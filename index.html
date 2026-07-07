@@ -56,6 +56,7 @@
   "contact": {
     "email": "your-email@example.com",
     "whatsapp": "",
+    "telegram": "",
     "x": "",
     "instagram": ""
   }
@@ -525,6 +526,8 @@ body.editing .ci-v.ci-edit:focus{outline:2px solid var(--brass);color:var(--bras
     <input id="dEmail" type="text">
     <label>WhatsApp number (with country code, e.g. +8490…)</label>
     <input id="dWhatsapp" type="text">
+    <label>Telegram — handle or full URL</label>
+    <input id="dTelegram" type="text" placeholder="@yourhandle or https://t.me/yourhandle">
     <label>X (Twitter) — handle or full URL</label>
     <input id="dX" type="text" placeholder="@yourhandle or https://x.com/yourhandle">
     <label>Instagram — handle or full URL</label>
@@ -650,6 +653,7 @@ function render(){
   var ct=DATA.contact,ctas=[];
   if(ct.email)ctas.push('<a class="btn primary" href="mailto:'+esc(ct.email)+'">✉ Email me</a>');
   if(ct.whatsapp)ctas.push('<a class="btn" href="https://wa.me/'+esc(ct.whatsapp.replace(/[^0-9]/g,''))+'" target="_blank">✆ WhatsApp</a>');
+  if(ct.telegram)ctas.push('<a class="btn" href="'+esc(socialUrl(ct.telegram,'https://t.me/'))+'" target="_blank" rel="noopener">✈ Telegram</a>');
   if(ct.x)ctas.push('<a class="btn" href="'+esc(socialUrl(ct.x,'https://x.com/'))+'" target="_blank" rel="noopener">𝕏  X</a>');
   if(ct.instagram)ctas.push('<a class="btn" href="'+esc(socialUrl(ct.instagram,'https://instagram.com/'))+'" target="_blank" rel="noopener">◎  Instagram</a>');
   document.getElementById('ctaRow').innerHTML=ctas.join('');
@@ -662,6 +666,7 @@ function renderContact(){
   var rows=[
     {k:'Email',    path:'contact.email',     val:ct.email,     ph:'you@email.com',  link:function(v){return 'mailto:'+v;},                     self:true},
     {k:'WhatsApp', path:'contact.whatsapp',  val:ct.whatsapp,  ph:'+84 90 123 4567',link:function(v){return 'https://wa.me/'+v.replace(/[^0-9]/g,'');}},
+    {k:'Telegram', path:'contact.telegram',  val:ct.telegram,  ph:'@yourhandle',     link:function(v){return socialUrl(v,'https://t.me/');}},
     {k:'X',        path:'contact.x',         val:ct.x,         ph:'@yourhandle',    link:function(v){return socialUrl(v,'https://x.com/');}},
     {k:'Instagram',path:'contact.instagram', val:ct.instagram, ph:'@yourhandle',    link:function(v){return socialUrl(v,'https://instagram.com/');}},
     {k:'Location', path:'profile.location',  val:p.location,   ph:'City, Country',  link:null}
@@ -820,9 +825,9 @@ function saveProject(){var title=document.getElementById('pmTitle').value.trim()
 function deleteProject(id){askConfirm('Delete project?','This project will be removed from your portfolio.',function(){DATA.projects=DATA.projects.filter(function(x){return x.id!==id;});render();persist();toast('Project deleted.');});}
 
 /* ---- details (tools + contact + toggles) ---- */
-function openDetails(){if(!editing){toast('Unlock edit mode first.');return;}document.getElementById('dTools').value=DATA.tools.join(', ');document.getElementById('dEmail').value=DATA.contact.email||'';document.getElementById('dWhatsapp').value=DATA.contact.whatsapp||'';document.getElementById('dX').value=DATA.contact.x||'';document.getElementById('dInstagram').value=DATA.contact.instagram||'';document.getElementById('dAvailable').value=DATA.profile.available?'yes':'no';document.getElementById('dVerified').value=DATA.profile.verified?'yes':'no';document.getElementById('detailsModal').classList.add('open');}
+function openDetails(){if(!editing){toast('Unlock edit mode first.');return;}document.getElementById('dTools').value=DATA.tools.join(', ');document.getElementById('dEmail').value=DATA.contact.email||'';document.getElementById('dWhatsapp').value=DATA.contact.whatsapp||'';document.getElementById('dTelegram').value=DATA.contact.telegram||'';document.getElementById('dX').value=DATA.contact.x||'';document.getElementById('dInstagram').value=DATA.contact.instagram||'';document.getElementById('dAvailable').value=DATA.profile.available?'yes':'no';document.getElementById('dVerified').value=DATA.profile.verified?'yes':'no';document.getElementById('detailsModal').classList.add('open');}
 function closeDetails(){document.getElementById('detailsModal').classList.remove('open');}
-function saveDetails(){DATA.tools=document.getElementById('dTools').value.split(',').map(function(s){return s.trim();}).filter(Boolean);DATA.contact.email=document.getElementById('dEmail').value.trim();DATA.contact.whatsapp=document.getElementById('dWhatsapp').value.trim();DATA.contact.x=document.getElementById('dX').value.trim();DATA.contact.instagram=document.getElementById('dInstagram').value.trim();DATA.profile.available=document.getElementById('dAvailable').value==='yes';DATA.profile.verified=document.getElementById('dVerified').value==='yes';closeDetails();render();persist();toast('Details updated.');}
+function saveDetails(){DATA.tools=document.getElementById('dTools').value.split(',').map(function(s){return s.trim();}).filter(Boolean);DATA.contact.email=document.getElementById('dEmail').value.trim();DATA.contact.whatsapp=document.getElementById('dWhatsapp').value.trim();DATA.contact.telegram=document.getElementById('dTelegram').value.trim();DATA.contact.x=document.getElementById('dX').value.trim();DATA.contact.instagram=document.getElementById('dInstagram').value.trim();DATA.profile.available=document.getElementById('dAvailable').value==='yes';DATA.profile.verified=document.getElementById('dVerified').value==='yes';closeDetails();render();persist();toast('Details updated.');}
 
 /* ---- reset local edits ---- */
 function resetLocal(){askConfirm('Reset edits?','This clears the edits saved in THIS browser and reloads the version built into the file. Your downloaded files are not affected.',function(){try{localStorage.removeItem(LS_KEY);}catch(e){}idbDel(DKEY).then(function(){location.reload();}).catch(function(){location.reload();});});}
