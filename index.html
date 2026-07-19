@@ -1527,16 +1527,102 @@ function saveDetails(){DATA.tools=document.getElementById('dTools').value.split(
 /* ---- reset local edits ---- */
 function resetLocal(){askConfirm('Reset edits?','This clears the edits saved in THIS browser and reloads the version built into the file. Your downloaded files are not affected.',function(){try{localStorage.removeItem(LS_KEY);}catch(e){}idbDel(DKEY).then(function(){location.reload();}).catch(function(){location.reload();});});}
 
-/* ---- save & download ---- */
-function saveAndDownload(){
+/* ---- save & download: split into a small index.html + a zip of only the NEW images/PDFs ---- */
+var ASSET_MIME_MAP={'image/png':{ext:'png',folder:'images',prefix:'img'},'image/jpeg':{ext:'jpg',folder:'images',prefix:'img'},'image/gif':{ext:'gif',folder:'images',prefix:'img'},'image/webp':{ext:'webp',folder:'images',prefix:'img'},'image/svg+xml':{ext:'svg',folder:'images',prefix:'img'},'application/pdf':{ext:'pdf',folder:'files',prefix:'file'}};
+
+function isDataUrl(s){return typeof s==='string'&&/^data:[\w.+-]+\/[\w.+-]+;base64,/i.test(s);}
+function dataUrlToBytes(dataUrl){var comma=dataUrl.indexOf(',');var mime=dataUrl.slice(5,comma).split(';')[0];var bin=atob(dataUrl.slice(comma+1));var bytes=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);return {mime:mime,bytes:bytes};}
+function fnv1aHex(bytes){var h=0x811c9dc5;for(var i=0;i<bytes.length;i++){h^=bytes[i];h=(h*0x01000193)>>>0;}return h.toString(16).padStart(8,'0');}
+async function assetHashHex(bytes){
+  try{
+    if(window.crypto&&crypto.subtle&&window.isSecureContext!==false){
+      var buf=await crypto.subtle.digest('SHA-1',bytes);
+      return Array.prototype.map.call(new Uint8Array(buf),function(b){return b.toString(16).padStart(2,'0');}).join('').slice(0,12);
+    }
+  }catch(e){}
+  return fnv1aHex(bytes); // fallback if SubtleCrypto unavailable
+}
+
+// Deep-walks a DATA tree, replacing embedded data: URLs with content-hash file
+// paths (images/img-<hash>.ext, files/file-<hash>.ext) and collecting the
+// decoded bytes so they can be zipped up separately from the HTML.
+async function extractAssetsFromTree(root){
+  var assets=[],hashToName={};
+  async function replaceOne(dataUrl){
+    var parsed=dataUrlToBytes(dataUrl);
+    var map=ASSET_MIME_MAP[parsed.mime.toLowerCase()];
+    if(!map)return dataUrl;
+    var hash=await assetHashHex(parsed.bytes);
+    var rel=map.folder+'/'+map.prefix+'-'+hash+'.'+map.ext;
+    if(!hashToName[hash]){hashToName[hash]=rel;assets.push({name:rel,bytes:parsed.bytes});}
+    return hashToName[hash];
+  }
+  async function walk(obj){
+    var keys=Array.isArray(obj)?obj.map(function(_,i){return i;}):Object.keys(obj);
+    for(var i=0;i<keys.length;i++){
+      var k=keys[i],v=obj[k];
+      if(isDataUrl(v))obj[k]=await replaceOne(v);
+      else if(v&&typeof v==='object')await walk(v);
+    }
+  }
+  await walk(root);
+  return assets;
+}
+
+/* ---- minimal ZIP writer (store/no-compression, no external deps) ---- */
+function crc32(bytes){
+  var t=crc32.table||(crc32.table=(function(){var table=[];for(var n=0;n<256;n++){var c=n;for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);table[n]=c;}return table;})());
+  var crc=0^(-1);
+  for(var i=0;i<bytes.length;i++)crc=(crc>>>8)^t[(crc^bytes[i])&0xFF];
+  return (crc^(-1))>>>0;
+}
+function u16(n){return new Uint8Array([n&0xFF,(n>>>8)&0xFF]);}
+function u32(n){return new Uint8Array([n&0xFF,(n>>>8)&0xFF,(n>>>16)&0xFF,(n>>>24)&0xFF]);}
+function buildZip(entries){
+  var parts=[],central=[],offset=0;
+  entries.forEach(function(e){
+    var nameBytes=new TextEncoder().encode(e.name);
+    var crc=crc32(e.bytes),size=e.bytes.length;
+    [u32(0x04034b50),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(size),u32(size),u16(nameBytes.length),u16(0),nameBytes].forEach(function(p){parts.push(p);});
+    parts.push(e.bytes);
+    var localSize=30+nameBytes.length;
+    central.push([u32(0x02014b50),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(size),u32(size),u16(nameBytes.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),nameBytes]);
+    offset+=localSize+size;
+  });
+  var centralStart=offset,centralSize=0;
+  central.forEach(function(ch){ch.forEach(function(p){parts.push(p);centralSize+=p.length;});});
+  [u32(0x06054b50),u16(0),u16(0),u16(entries.length),u16(entries.length),u32(centralSize),u32(centralStart),u16(0)].forEach(function(p){parts.push(p);});
+  return new Blob(parts,{type:'application/zip'});
+}
+
+function downloadBlob(blob,filename){var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},1500);}
+
+async function saveAndDownload(){
   document.querySelectorAll('[data-field]').forEach(function(el){setPath(el.getAttribute('data-field'),el.textContent.trim());});
   var wasEditing=editing;editing=false;document.body.classList.remove('editing');document.getElementById('editToolbar').classList.remove('show');document.getElementById('fabIcon').textContent='🔒';document.getElementById('fabText').textContent='Owner edit';applyEditableState();
-  document.getElementById('site-data').textContent=JSON.stringify(DATA,null,2);
+
+  // work on a clone so the live tab keeps showing its already-working embedded
+  // images/PDFs — only the exported copy gets rewritten to file paths.
+  var exportData=clone(DATA),assets=[];
+  try{assets=await extractAssetsFromTree(exportData);}
+  catch(err){toast('Could not split out embedded files ('+err.message+'). Saving as one file instead.');exportData=clone(DATA);assets=[];}
+
+  var siteDataEl=document.getElementById('site-data'),prevSiteData=siteDataEl.textContent;
+  siteDataEl.textContent=JSON.stringify(exportData,null,2);
   document.getElementById('gallery').innerHTML='';document.getElementById('tools').innerHTML='';document.getElementById('svcGrid').innerHTML='';document.getElementById('filters').innerHTML='';document.getElementById('ctaRow').innerHTML='';
   var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+  siteDataEl.textContent=prevSiteData;
   render();if(wasEditing)enterEdit();persist();
-  try{var blob=new Blob([html],{type:'text/html'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='duong-portfolio.html';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},1500);toast('Saved — duong-portfolio.html downloaded.');}
-  catch(err){toast('Download blocked here. Open this file in your browser first, then Save.');}
+
+  try{
+    downloadBlob(new Blob([html],{type:'text/html'}),'duong-portfolio.html');
+    if(assets.length){
+      downloadBlob(buildZip(assets),'duong-portfolio-assets.zip');
+      toast('Saved — duong-portfolio.html + '+assets.length+' new file(s) in duong-portfolio-assets.zip downloaded.');
+    }else{
+      toast('Saved — duong-portfolio.html downloaded.');
+    }
+  }catch(err){toast('Download blocked here. Open this file in your browser first, then Save.');}
 }
 
 (function(){

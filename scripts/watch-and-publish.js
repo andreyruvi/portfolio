@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /*
- * Watches the Downloads folder for "duong-portfolio.html" (the file the
- * "Owner edit -> Save & Download" button in index.html produces), pulls any
- * newly embedded base64 images/PDFs out into images/ and files/, writes the
- * cleaned result over index.html, then commits and pushes to GitHub.
+ * Watches the Downloads folder for "duong-portfolio.html" and its sibling
+ * "duong-portfolio-assets.zip" (the two files the "Owner edit -> Save &
+ * Download" button in index.html produces — a small HTML file plus a zip of
+ * only the newly-added images/PDFs). Unzips any new assets into images/ and
+ * files/, writes the cleaned HTML over index.html, then commits and pushes
+ * to GitHub.
  *
  * Run this locally while you edit the live/local site as the owner:
  *   node scripts/watch-and-publish.js
@@ -13,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { execFileSync } = require('child_process');
 
 const REPO_DIR = path.resolve(__dirname, '..');
@@ -20,8 +23,10 @@ const INDEX_PATH = path.join(REPO_DIR, 'index.html');
 const IMAGES_DIR = path.join(REPO_DIR, 'images');
 const FILES_DIR = path.join(REPO_DIR, 'files');
 const WATCH_NAME = process.env.WATCH_FILENAME || 'duong-portfolio.html';
+const ZIP_NAME = process.env.ASSETS_ZIP_FILENAME || 'duong-portfolio-assets.zip';
 const DOWNLOADS_DIR = process.env.DOWNLOADS_DIR || path.join(os.homedir(), 'Downloads');
 const WATCH_PATH = path.join(DOWNLOADS_DIR, WATCH_NAME);
+const ZIP_PATH = path.join(DOWNLOADS_DIR, ZIP_NAME);
 
 function log(msg) {
   console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
@@ -102,10 +107,16 @@ function extractEmbeddedAssets(html) {
   return { cleaned, created };
 }
 
-function waitForStableFile(filePath, cb) {
+function waitForStableFile(filePath, cb, { timeoutMs = null } = {}) {
   let lastSize = -1;
   let stableTicks = 0;
+  const started = Date.now();
   const timer = setInterval(() => {
+    if (timeoutMs !== null && Date.now() - started > timeoutMs) {
+      clearInterval(timer);
+      cb(false);
+      return;
+    }
     let size;
     try {
       size = fs.statSync(filePath).size;
@@ -116,7 +127,7 @@ function waitForStableFile(filePath, cb) {
       stableTicks++;
       if (stableTicks >= 2) {
         clearInterval(timer);
-        cb();
+        cb(true);
       }
     } else {
       stableTicks = 0;
@@ -125,20 +136,69 @@ function waitForStableFile(filePath, cb) {
   }, 300);
 }
 
-function publish() {
-  log(`Detected export at ${WATCH_PATH}, processing...`);
-  const raw = fs.readFileSync(WATCH_PATH, 'utf8');
-  const { cleaned, created } = extractEmbeddedAssets(raw);
-
-  const current = fs.existsSync(INDEX_PATH) ? fs.readFileSync(INDEX_PATH, 'utf8') : '';
-  if (cleaned === current) {
-    log('No changes from current index.html — skipping commit.');
-    return;
+// Reads a zip file's central directory and returns [{name, data}], decoding
+// both "stored" (method 0, what buildZip() in index.html writes) and
+// "deflate" (method 8) entries so this stays compatible with any zip tool.
+function readZipEntries(buf) {
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
   }
+  if (eocd === -1) throw new Error('Not a valid zip (no end-of-central-directory record)');
+  const total = buf.readUInt16LE(eocd + 10);
+  let cdOffset = buf.readUInt32LE(eocd + 16);
 
-  fs.writeFileSync(INDEX_PATH, cleaned, 'utf8');
-  if (created.length) log(`Extracted ${created.length} new embedded file(s): ${created.join(', ')}`);
+  const entries = [];
+  for (let i = 0; i < total; i++) {
+    if (buf.readUInt32LE(cdOffset) !== 0x02014b50) throw new Error('Corrupt zip central directory');
+    const method = buf.readUInt16LE(cdOffset + 10);
+    const compSize = buf.readUInt32LE(cdOffset + 20);
+    const nameLen = buf.readUInt16LE(cdOffset + 28);
+    const extraLen = buf.readUInt16LE(cdOffset + 30);
+    const commentLen = buf.readUInt16LE(cdOffset + 32);
+    const localOffset = buf.readUInt32LE(cdOffset + 42);
+    const name = buf.toString('utf8', cdOffset + 46, cdOffset + 46 + nameLen);
 
+    const lfNameLen = buf.readUInt16LE(localOffset + 26);
+    const lfExtraLen = buf.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + lfNameLen + lfExtraLen;
+    const raw = buf.subarray(dataStart, dataStart + compSize);
+    const data = method === 0 ? raw : zlib.inflateRawSync(raw);
+    entries.push({ name, data });
+
+    cdOffset += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+function applyAssetsZip(zipPath) {
+  const buf = fs.readFileSync(zipPath);
+  const entries = readZipEntries(buf);
+  const written = [];
+  for (const { name, data } of entries) {
+    const dest = path.join(REPO_DIR, name);
+    if (!dest.startsWith(REPO_DIR + path.sep)) continue; // guard against path traversal
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    if (!fs.existsSync(dest)) {
+      fs.writeFileSync(dest, data);
+      written.push(name);
+    }
+  }
+  return written;
+}
+
+// Which images/files/... paths does this HTML reference that don't exist on disk yet?
+function findMissingReferencedAssets(html) {
+  const re = /\b(images|files)\/[\w.+-]+\.\w+/g;
+  const missing = new Set();
+  let m;
+  while ((m = re.exec(html))) {
+    if (!fs.existsSync(path.join(REPO_DIR, m[0]))) missing.add(m[0]);
+  }
+  return [...missing];
+}
+
+function commitAndPush(summary) {
   try {
     const addArgs = ['add', 'index.html'];
     if (fs.existsSync(IMAGES_DIR)) addArgs.push('images');
@@ -153,7 +213,7 @@ function publish() {
       // non-zero exit means there ARE staged changes, which is what we want
     }
 
-    run('git', ['commit', '-m', `Owner edit: update portfolio (${new Date().toISOString()})`]);
+    run('git', ['commit', '-m', `Owner edit: update portfolio (${new Date().toISOString()})${summary ? '\n\n' + summary : ''}`]);
     log('Committed. Pushing to origin/main...');
     run('git', ['push', 'origin', 'main']);
     log('Pushed to GitHub successfully.');
@@ -163,18 +223,63 @@ function publish() {
   }
 }
 
+function publish() {
+  log(`Detected export at ${WATCH_PATH}, processing...`);
+  const raw = fs.readFileSync(WATCH_PATH, 'utf8');
+  // legacy fallback: pulls out any base64 that slipped through unsplit
+  const { cleaned, created } = extractEmbeddedAssets(raw);
+  if (created.length) log(`Extracted ${created.length} embedded file(s) directly from HTML: ${created.join(', ')}`);
+
+  const current = fs.existsSync(INDEX_PATH) ? fs.readFileSync(INDEX_PATH, 'utf8') : '';
+  const missing = findMissingReferencedAssets(cleaned);
+
+  const finish = (assetSummary) => {
+    if (cleaned === current) {
+      log('No changes from current index.html — skipping commit.');
+      return;
+    }
+    fs.writeFileSync(INDEX_PATH, cleaned, 'utf8');
+    commitAndPush(assetSummary);
+  };
+
+  if (missing.length === 0) {
+    finish(null);
+    return;
+  }
+
+  log(`Waiting for ${ZIP_NAME} with ${missing.length} referenced file(s) not yet on disk...`);
+  waitForStableFile(ZIP_PATH, (ok) => {
+    if (!ok) {
+      log(`WARNING: ${ZIP_NAME} never appeared. Publishing HTML anyway — these paths will be broken until the assets are added: ${missing.join(', ')}`);
+      finish(null);
+      return;
+    }
+    try {
+      const written = applyAssetsZip(ZIP_PATH);
+      log(`Unzipped ${written.length} new file(s): ${written.join(', ')}`);
+      const stillMissing = missing.filter((m) => !fs.existsSync(path.join(REPO_DIR, m)));
+      if (stillMissing.length) log(`WARNING: still missing after unzip: ${stillMissing.join(', ')}`);
+      finish(`Includes ${written.length} new asset file(s) from ${ZIP_NAME}.`);
+    } catch (err) {
+      log(`ERROR unzipping ${ZIP_NAME}: ${err.message}`);
+      finish(null);
+    }
+  }, { timeoutMs: 20000 });
+}
+
 function main() {
   if (!fs.existsSync(DOWNLOADS_DIR)) {
     console.error(`Downloads folder not found: ${DOWNLOADS_DIR}`);
     process.exit(1);
   }
-  log(`Watching ${WATCH_PATH}`);
+  log(`Watching ${WATCH_PATH} (+ ${ZIP_NAME} when new assets are added)`);
   log('Leave this running. In the site, click "Owner edit" -> make changes -> "Save & Download".');
 
   fs.watch(DOWNLOADS_DIR, (eventType, filename) => {
     if (filename !== WATCH_NAME) return;
     if (!fs.existsSync(WATCH_PATH)) return;
-    waitForStableFile(WATCH_PATH, () => {
+    waitForStableFile(WATCH_PATH, (ok) => {
+      if (!ok) return;
       try {
         publish();
       } catch (err) {
@@ -186,4 +291,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { extractEmbeddedAssets, publish };
+module.exports = { extractEmbeddedAssets, readZipEntries, applyAssetsZip, findMissingReferencedAssets, publish };
