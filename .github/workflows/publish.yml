@@ -1,8 +1,14 @@
 name: Publish site
 
-# Runs on every push to main. Optimises any newly added photos, rebuilds
-# index.html from data/site.json, and commits the result back — which is what
-# GitHub Pages then serves. Nothing to do by hand.
+# Runs on every push to main.
+#
+# index.html is YOURS. You get it from "Save & Download" in owner mode and push
+# it with PUBLISH.bat, so this workflow must never overwrite it. It only steps
+# in when data/site.json changed on its own — the case where someone edited the
+# JSON by hand and no matching page came with it.
+#
+# It also converts any PNG/JPG dropped into images/ to WebP, which never touches
+# the page.
 
 on:
   push:
@@ -22,22 +28,35 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2          # need the previous commit to see what changed
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Optimise any new photos
+      - name: Convert any new photos to WebP
         run: node scripts/optimize-images.mjs
 
-      - name: Rebuild index.html from data/site.json
-        run: node scripts/build.mjs
+      - name: Rebuild the page only if the data changed without it
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          echo "Changed in this push:"; echo "$CHANGED"
 
-      - name: Commit the rebuilt site
+          if echo "$CHANGED" | grep -qx 'index.html'; then
+            echo "index.html was pushed — leaving it exactly as you saved it."
+          elif echo "$CHANGED" | grep -qx 'data/site.json'; then
+            echo "data/site.json changed on its own — regenerating index.html to match."
+            node scripts/build.mjs
+          else
+            echo "Neither the page nor the data changed — nothing to rebuild."
+          fi
+
+      - name: Commit anything the steps above produced
         run: |
           if [ -z "$(git status --porcelain)" ]; then
-            echo "Nothing changed — site is already up to date."
+            echo "Nothing changed — the site is already up to date."
             exit 0
           fi
           git config user.name  "github-actions[bot]"

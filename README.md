@@ -78,43 +78,39 @@ GitHub does that step for you on every push.
 
 ---
 
-## Two ways to publish
+## How to publish
 
-**A — from the browser (needs a token).** Press **Publish to GitHub** in owner mode.
-One click, done in about a minute.
+1. Open the site, click **Owner edit**, enter your password.
+2. Change whatever you want.
+3. Press **⤓ Save & Download** → you get `portfolio-update.zip`.
+4. Extract it **into this folder**, saying yes when Windows asks to replace files.
+5. Double-click `PUBLISH.bat`.
 
-**B — manually (no token).** Edit in the browser, press **⤓ Save & Download**, drop
-the file into this folder, then double-click `PUBLISH.bat`.
+The zip contains a finished `index.html`, the matching `data/site.json`, and any
+photos you added — already resized to WebP, full size and thumbnail, at the
+right paths. Extracting it puts every file exactly where it belongs.
 
-- With no new photos you get `site.json` → replace `data/site.json` with it.
-- With new photos you get `portfolio-content.zip` → extract it *into* the
-  portfolio folder, overwriting when asked. It already contains the right
-  `data/` and `images/` paths.
+Nothing in the page talks to GitHub. `PUBLISH.bat` does the pushing, using the
+Git login already on your computer.
 
 ## Your password
 
 Owner mode opens with the password in `data/site.json` (`editor.editKey`).
-Change it from **Change password** in the edit toolbar, then publish.
+Change it from **Change password** in the edit toolbar, then Save & Download and
+publish.
 
-Note that this password sits in a public file, so treat it as a lock on the
-door rather than a secret — it stops a visitor idly clicking into edit mode, and
-nothing more. The real protection is the GitHub token: without one, nobody can
-change what is published, no matter what they type into the page.
+That file is public, so treat the password as a lock on a door rather than a
+secret: it stops a visitor idly clicking into edit mode. It is not what protects
+the site — pushing requires your GitHub login, which lives on your computer.
 
-## Your GitHub token
+## index.html is yours
 
-The **Publish** button needs a token so the browser can write to this repository.
+`index.html` is generated, but it is generated **by you**, in the browser, when
+you press Save & Download. CI will not touch a page you push.
 
-Create one at
-<https://github.com/settings/personal-access-tokens/new>:
-
-- **Repository access:** Only select repositories → `andreyruvi/portfolio`
-- **Permissions:** Contents → *Read and write*
-- **Expiration:** 90 days (make a new one when it expires)
-
-The token is optional — you only need it for route A. It is stored only in your
-browser's local storage and is never written into this repository. If you use a shared or public computer, press **Sign out** when you
-finish, or revoke the token from that same settings page.
+The one exception: if you edit `data/site.json` by hand and push it *without* a
+matching `index.html`, CI regenerates the page so the two cannot disagree. You
+can do the same locally with `npm run build`.
 
 ---
 

@@ -548,5 +548,9 @@
     "repo": "andreyruvi/portfolio",
     "branch": "main",
     "editKey": "Revit Designer"
+  },
+  "counters": {
+    "img": 107,
+    "doc": 0
   }
 }

@@ -1,39 +1,38 @@
 /* =============================================================================
    editor.js — Owner mode. Loaded on demand (#edit, or Ctrl+Shift+E).
 
-   Everything the original site could edit, plus one-click publishing:
+   The workflow:
 
-       edit in the page  ->  Publish  ->  one commit to data/site.json
-                         ->  GitHub Actions rebuilds index.html
-                         ->  live site updates in about a minute.
+       edit in the page  ->  Save & Download  ->  portfolio-update.zip
+                         ->  extract it into your portfolio folder
+                         ->  PUBLISH.bat  ->  live site.
 
-   Drafts auto-save into this browser (IndexedDB) exactly as before, so closing
-   the tab mid-edit loses nothing. "Reset to file" throws the draft away and
-   goes back to what is published.
+   The zip holds a finished index.html, the matching data/site.json, and any
+   photos you added — each already resized and converted, at the right path.
 
-   The GitHub token lives only in this browser's localStorage. It is never
-   written into the repository and never sent anywhere except api.github.com.
+   Drafts auto-save into this browser (IndexedDB), so closing the tab mid-edit
+   loses nothing. "Reset to file" throws the draft away and goes back to the
+   published version.
+
+   Nothing here talks to GitHub. Publishing is PUBLISH.bat's job, using the Git
+   login already on your computer.
    ========================================================================== */
 import * as R from './render.js';
+import { buildPage } from './page.js';
 import { DATA, state, renderWork, observeReveal, paintImages, setupCoverFlow } from './app.js';
 import { makeZip, textBytes, base64Bytes, download } from './zip.js';
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-const API = 'https://api.github.com';
 const LS_OWNER = 'pf.owner';
-const LS_TOKEN = 'pf.gh';
 const DB_NAME = 'pf-portfolio', STORE = 'kv';
 
 let unlocked = false;
 let dirty = false;
-let ORIGINAL = null;                 // pristine copy of the published JSON
-const pending = new Map();           // repo path -> base64, uploaded on publish
-
-const repo   = () => DATA.editor?.repo   || 'andreyruvi/portfolio';
-const branch = () => DATA.editor?.branch || 'main';
-const token  = () => localStorage.getItem(LS_TOKEN) || '';
+let ORIGINAL = null;                 // pristine copy of the published content
+const pending = new Map();           // repo path -> base64, written into the zip
+const stagedDims = new Map();        // repo path -> width/height attributes
 
 /* =========================================================== tiny helpers */
 let toastEl;
@@ -112,10 +111,10 @@ function markStatus(msg) {
   const fab = $('#editFab');
   if (fab) {
     fab.dataset.dirty = dirty ? 'true' : 'false';
-    fab.textContent = dirty ? '● Publish your changes' : '🔒 Owner edit';
+    fab.textContent = dirty ? '● Save & Download' : '🔒 Owner edit';
   }
   const st = $('#saveState');
-  if (st) st.textContent = msg !== undefined ? msg : (dirty ? 'NOT PUBLISHED YET' : 'published');
+  if (st) st.textContent = msg !== undefined ? msg : (dirty ? 'NOT SAVED TO YOUR FOLDER YET' : 'up to date');
 }
 
 let saveTimer = null;
@@ -126,7 +125,7 @@ function persist() {
   saveTimer = setTimeout(async () => {
     await idbSet('data', JSON.parse(JSON.stringify(DATA)));
     await idbSet('pending', Object.fromEntries(pending));
-    markStatus('NOT PUBLISHED YET — draft saved in this browser');
+    markStatus('NOT DOWNLOADED YET — draft saved in this browser');
   }, 400);
 }
 
@@ -135,126 +134,42 @@ async function clearDraft() {
   await idbDel('pending');
   pending.clear();
   dirty = false;
-  markStatus('published');
+  markStatus('up to date');
 }
 
-/* ================================================================== GitHub */
-async function gh(path, options = {}) {
-  const res = await fetch(API + path, {
-    ...options,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token()}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...options.headers,
-    },
-  });
-  if (!res.ok) {
-    let detail = '';
-    try { detail = (await res.json()).message || ''; } catch { /* no body */ }
-    throw new Error(`GitHub ${res.status}: ${detail || res.statusText}`);
-  }
-  return res.status === 204 ? null : res.json();
+/* ==================================================== save & download */
+/** Sizes for the <img> tags: from the page for existing photos, from the
+ *  canvas for ones added just now. Only a hint that stops the layout jumping. */
+function dimsFor(src) {
+  if (stagedDims.has(src)) return stagedDims.get(src);
+  const el = document.querySelector(`img[src="${CSS.escape(src)}"][width][height]`);
+  return el ? ` width="${el.getAttribute('width')}" height="${el.getAttribute('height')}"` : '';
 }
 
 /**
- * One atomic commit: data/site.json plus every newly added image or PDF.
- * Uses the Git Data API (blobs -> tree -> commit -> ref) so the whole change is
- * a single commit and a single Actions run, rather than a burst of them.
- */
-async function publishToGitHub(message) {
-  const ref = await gh(`/repos/${repo()}/git/ref/heads/${branch()}`);
-  const baseSha = ref.object.sha;
-  const baseCommit = await gh(`/repos/${repo()}/git/commits/${baseSha}`);
-
-  const tree = [];
-  const jsonBlob = await gh(`/repos/${repo()}/git/blobs`, {
-    method: 'POST',
-    body: JSON.stringify({ content: JSON.stringify(DATA, null, 2), encoding: 'utf-8' }),
-  });
-  tree.push({ path: 'data/site.json', mode: '100644', type: 'blob', sha: jsonBlob.sha });
-
-  for (const [p, base64] of pending) {
-    const blob = await gh(`/repos/${repo()}/git/blobs`, {
-      method: 'POST',
-      body: JSON.stringify({ content: base64, encoding: 'base64' }),
-    });
-    tree.push({ path: p, mode: '100644', type: 'blob', sha: blob.sha });
-  }
-
-  const newTree = await gh(`/repos/${repo()}/git/trees`, {
-    method: 'POST',
-    body: JSON.stringify({ base_tree: baseCommit.tree.sha, tree }),
-  });
-  const commit = await gh(`/repos/${repo()}/git/commits`, {
-    method: 'POST',
-    body: JSON.stringify({ message, tree: newTree.sha, parents: [baseSha] }),
-  });
-  await gh(`/repos/${repo()}/git/refs/heads/${branch()}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ sha: commit.sha }),
-  });
-  return commit.sha;
-}
-
-/** Ask for a token only when one is actually required. */
-function askToken() {
-  return new Promise((resolve) => {
-    modal('GitHub token needed',
-      'Publishing straight from the browser needs a token. If you would rather not use one, press Cancel and use "Save & Download" instead.', `
-      <label>GitHub token</label>
-      <input id="tkIn" type="password" autocomplete="off" placeholder="github_pat_…">`, [
-      { label: 'Cancel', onClick: (m) => { m.remove(); resolve(false); } },
-      { label: 'Save token', primary: true, onClick: (m) => {
-          const t = $('#tkIn', m).value.trim();
-          if (!t) { toast('Paste the token first.', 'err'); return; }
-          localStorage.setItem(LS_TOKEN, t);
-          m.remove(); resolve(true);
-        } },
-    ]);
-  });
-}
-
-async function doPublish() {
-  if (!dirty && !pending.size) { toast('Nothing to publish yet.'); return; }
-  if (!token() && !(await askToken())) {
-    toast('Nothing was published. Your changes are still here — use "Save & Download" instead.', 'err', 9000);
-    return;
-  }
-  const btn = $('#publishBtn');
-  const old = btn ? btn.textContent : '';
-  if (btn) { btn.textContent = 'Publishing…'; btn.disabled = true; }
-  try {
-    const sha = await publishToGitHub(
-      `Update site content (${new Date().toISOString().slice(0, 16).replace('T', ' ')})`
-    );
-    ORIGINAL = JSON.parse(JSON.stringify(DATA));
-    await clearDraft();
-    toast(`Published ${sha.slice(0, 7)}. The live site updates in about a minute.`, 'ok', 8000);
-  } catch (err) {
-    toast(String(err.message || err), 'err', 10000);
-  } finally {
-    if (btn) { btn.textContent = old; btn.disabled = false; }
-  }
-}
-
-/* ================================================= save & download (no token) */
-/**
- * The manual route: hand over the edited content as a file to drop into the
- * portfolio folder, then publish with PUBLISH.bat. No GitHub token involved.
+ * Hands over everything the site needs, at the paths it needs:
+ *   index.html          the finished page
+ *   data/site.json      the same content as data, so the two never disagree
+ *   images/…            any photo added in this session, full size and thumb
  */
 function saveAndDownload() {
-  const json = JSON.stringify(DATA, null, 2);
-  if (!pending.size) {
-    download(new Blob([json], { type: 'application/json' }), 'site.json');
-    toast('Saved site.json — put it in your portfolio folder under data\\, replacing the old one, then run PUBLISH.bat.', 'ok', 12000);
-    return;
-  }
-  const files = [{ name: 'data/site.json', bytes: textBytes(json) }];
+  const html = buildPage(DATA, { dims: dimsFor });
+  const files = [
+    { name: 'index.html', bytes: textBytes(html) },
+    { name: 'data/site.json', bytes: textBytes(JSON.stringify(DATA, null, 2)) },
+  ];
   for (const [path, b64] of pending) files.push({ name: path, bytes: base64Bytes(b64) });
-  download(makeZip(files), 'portfolio-content.zip');
-  toast(`Saved portfolio-content.zip with your new photos. Extract it INTO your portfolio folder, overwriting when asked, then run PUBLISH.bat.`, 'ok', 14000);
+
+  download(makeZip(files), 'portfolio-update.zip');
+
+  const photos = [...pending.keys()].filter((k) => !k.startsWith('images/thumb/')).length;
+  markStatus('DOWNLOADED — extract it into your folder, then run PUBLISH.bat');
+  toast(
+    photos
+      ? `Downloaded portfolio-update.zip — index.html plus ${photos} new photo${photos > 1 ? 's' : ''}. Extract it INTO your portfolio folder, overwrite when asked, then run PUBLISH.bat.`
+      : 'Downloaded portfolio-update.zip with the new index.html. Extract it INTO your portfolio folder, overwrite when asked, then run PUBLISH.bat.',
+    'ok', 15000
+  );
 }
 
 /* ============================================================ image intake */
@@ -274,7 +189,7 @@ function encode(img, maxEdge, quality) {
   c.width = Math.round(img.width * scale);
   c.height = Math.round(img.height * scale);
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-  return c.toDataURL('image/webp', quality).split(',')[1];
+  return { b64: c.toDataURL('image/webp', quality).split(',')[1], w: c.width, h: c.height };
 }
 
 const fileToBase64 = (file) => new Promise((res, rej) => {
@@ -284,15 +199,21 @@ const fileToBase64 = (file) => new Promise((res, rej) => {
   fr.readAsDataURL(file);
 });
 
+/**
+ * Next free file name. Starts from the high-water mark the build recorded from
+ * the images folder itself — the JSON alone does not know about files that sit
+ * on disk unreferenced, and reusing one of those numbers would overwrite a
+ * photo that is still in the repository.
+ */
 function nextName(ext) {
-  const re = new RegExp(`-(\\d+)\\.${ext}$`);
-  let max = 0;
+  const stem = ext === 'pdf' ? 'doc' : 'img';
+  const re = new RegExp(`${stem}-(\\d+)\\.${ext}$`);
+  let max = Number(DATA.counters?.[stem === 'doc' ? 'doc' : 'img']) || 0;
   const scan = (s) => { const m = re.exec(s || ''); if (m) max = Math.max(max, +m[1]); };
   scan(DATA.profile.avatar); scan(DATA.profile.cover);
   (DATA.profile.covers || []).forEach(scan);
   DATA.projects.forEach((p) => { scan(p.image); (p.media || []).forEach((m) => scan(m.src)); });
   pending.forEach((_, p) => scan(p));
-  const stem = ext === 'pdf' ? 'doc' : 'img';
   return `${stem}-${String(max + 1).padStart(3, '0')}.${ext}`;
 }
 
@@ -300,8 +221,12 @@ function nextName(ext) {
 async function stageImage(file) {
   const img = await readImage(file);
   const name = nextName('webp');
-  pending.set(`images/${name}`, encode(img, MAX_EDGE, 0.82));
-  pending.set(`images/thumb/${name}`, encode(img, THUMB_EDGE, 0.72));
+  const full = encode(img, MAX_EDGE, 0.82);
+  const thumb = encode(img, THUMB_EDGE, 0.72);
+  pending.set(`images/${name}`, full.b64);
+  pending.set(`images/thumb/${name}`, thumb.b64);
+  stagedDims.set(`images/${name}`, ` width="${full.w}" height="${full.h}"`);
+  stagedDims.set(`images/thumb/${name}`, ` width="${thumb.w}" height="${thumb.h}"`);
   return { type: 'image', src: `images/${name}` };
 }
 
@@ -482,7 +407,7 @@ function openDetails() {
         DATA.profile.available = $('#dAvailable', m).value === 'yes';
         DATA.profile.verified  = $('#dVerified', m).value === 'yes';
         m.remove(); persist(); renderAll();
-        toast('Details updated. Press Publish when you are done.');
+        toast('Details updated. Save & Download when you are finished.');
       } },
   ]);
   return box;
@@ -576,8 +501,8 @@ function openProject(id) {
         w.remove(); persist(); renderAll();
         flashCard(draft.id);
         toast(isNew
-          ? 'Project added — remember to Publish, it is not live yet.'
-          : 'Project updated — remember to Publish, it is not live yet.', 'ok', 7000);
+          ? 'Project added — remember to Save & Download, it is not live yet.'
+          : 'Project updated — remember to Save & Download, it is not live yet.', 'ok', 7000);
       } },
   ]);
 
@@ -724,8 +649,7 @@ function toolbar() {
     <button type="button" id="tbAvatar">⟲ Change photo</button>
     <button type="button" id="tbKey">Change password</button>
     <button type="button" id="tbReset">↺ Reset to file</button>
-    <button type="button" id="tbDownload">⤓ Save &amp; Download</button>
-    <button type="button" class="save" id="publishBtn">💾 Publish to GitHub</button>
+    <button type="button" class="save" id="tbDownload">⤓ Save &amp; Download</button>
     <button type="button" id="tbExit">Exit</button>`;
   document.body.appendChild(bar);
 
@@ -741,7 +665,7 @@ function toolbar() {
   });
   $('#tbKey').addEventListener('click', openChangeKey);
   $('#tbReset').addEventListener('click', () => {
-    confirmBox('Throw away local changes?', 'Everything goes back to what is published on GitHub.', async () => {
+    confirmBox('Throw away local changes?', 'Everything goes back to the version currently on your website.', async () => {
       Object.keys(DATA).forEach((k) => delete DATA[k]);
       Object.assign(DATA, JSON.parse(JSON.stringify(ORIGINAL)));
       await clearDraft();
@@ -751,9 +675,8 @@ function toolbar() {
     });
   });
   $('#tbDownload').addEventListener('click', saveAndDownload);
-  $('#publishBtn').addEventListener('click', doPublish);
   $('#tbExit').addEventListener('click', () => {
-    if (dirty && !confirm('You have unpublished changes. Leave edit mode anyway?')) return;
+    if (dirty && !confirm('You have changes that are not downloaded yet. Leave edit mode anyway?')) return;
     localStorage.removeItem(LS_OWNER);
     location.hash = '';
     location.reload();
@@ -766,7 +689,7 @@ function toolbar() {
 }
 
 function openChangeKey() {
-  modal('Change password', 'This is the key you type to open owner mode. It is stored in data/site.json, so publish after changing it.', `
+  modal('Change password', 'This is the key you type to open owner mode. It is stored in data/site.json, so Save & Download and publish after changing it.', `
       <label>New password</label>
       <input id="ckNew" type="password" autocomplete="new-password">
       <label>Type it again</label>
@@ -778,7 +701,7 @@ function openChangeKey() {
         if (a !== b) { toast('The two passwords do not match.', 'err'); return; }
         DATA.editor.editKey = a;
         m.remove(); persist();
-        toast('Password changed. Press Publish to make it live.');
+        toast('Password changed. Save & Download, then run PUBLISH.bat to make it live.');
       } },
   ]);
 }
@@ -797,29 +720,23 @@ async function unlock() {
     Object.assign(DATA, draft);
     if (savedPending) Object.entries(savedPending).forEach(([k, v]) => pending.set(k, v));
     dirty = true;
-    markStatus('NOT PUBLISHED YET — draft restored');
-    toast('Restored the draft you were working on in this browser. It is not live yet — press Publish, or Save & Download.', 'ok', 9000);
+    markStatus('NOT DOWNLOADED YET — draft restored');
+    toast('Restored the draft you were working on in this browser. It is not on your website yet — use Save & Download.', 'ok', 9000);
   }
 
   renderAll();
   $$('.hint').forEach((h) => h.setAttribute('data-show', ''));
-  if (!token()) {
-    toast('Editing without a GitHub token. When you are done, use "Save & Download" and then PUBLISH.bat.', 'ok', 9000);
-  }
+  toast('Edit anything you like. When you are done: Save & Download, extract into your folder, then PUBLISH.bat.', 'ok', 9000);
   markStatus();
 }
 
 function askUnlock() {
-  modal('Owner login', 'The password just opens editing. A GitHub token is optional — it is only needed to publish straight from the browser.', `
+  modal('Owner login', 'Enter your password to edit the site.', `
       <label>Password</label>
-      <input id="uKey" type="password" autocomplete="current-password">
-      <label>GitHub token — optional${token() ? ', already saved' : ''}</label>
-      <input id="uTok" type="password" autocomplete="off" placeholder="leave blank to edit without publishing">`, [
+      <input id="uKey" type="password" autocomplete="current-password">`, [
     { label: 'Cancel', onClick: (m) => m.remove() },
     { label: 'Unlock', primary: true, onClick: (m) => {
         if ($('#uKey', m).value !== (DATA.editor?.editKey || '')) { toast('Wrong password.', 'err'); return; }
-        const t = $('#uTok', m).value.trim();
-        if (t) localStorage.setItem(LS_TOKEN, t);
         m.remove();
         unlock();
       } },
@@ -829,7 +746,7 @@ function askUnlock() {
 /* ==================================================================== init */
 /** Entry point for the always-visible Owner edit button in the page. */
 export function requestUnlock() {
-  if (unlocked) doPublish();
+  if (unlocked) saveAndDownload();
   else askUnlock();
 }
 
