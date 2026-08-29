@@ -1,0 +1,47 @@
+name: Publish site
+
+# Runs on every push to main. Optimises any newly added photos, rebuilds
+# index.html from data/site.json, and commits the result back — which is what
+# GitHub Pages then serves. Nothing to do by hand.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-site
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Optimise any new photos
+        run: node scripts/optimize-images.mjs
+
+      - name: Rebuild index.html from data/site.json
+        run: node scripts/build.mjs
+
+      - name: Commit the rebuilt site
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Nothing changed — site is already up to date."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Rebuild site [skip ci]"
+          git push
