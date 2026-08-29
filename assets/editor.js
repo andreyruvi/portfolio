@@ -101,18 +101,32 @@ async function idbDel(key) {
 }
 
 /* ------------------------------------------------------------- draft state */
+/**
+ * A draft saved in this browser is NOT published. Conflating the two is how a
+ * new project can look saved and still never reach the live site, so say which
+ * state we are in, in both places the owner looks.
+ */
+function markStatus(msg) {
+  const bar = $('#editToolbar');
+  if (bar) bar.dataset.dirty = dirty ? 'true' : 'false';
+  const fab = $('#editFab');
+  if (fab) {
+    fab.dataset.dirty = dirty ? 'true' : 'false';
+    fab.textContent = dirty ? '● Publish your changes' : '🔒 Owner edit';
+  }
+  const st = $('#saveState');
+  if (st) st.textContent = msg !== undefined ? msg : (dirty ? 'NOT PUBLISHED YET' : 'published');
+}
+
 let saveTimer = null;
 function persist() {
   dirty = true;
-  const fab = $('#editFab');
-  if (fab) fab.dataset.dirty = 'true';
-  const st = $('#saveState');
-  if (st) st.textContent = 'saving…';
+  markStatus('saving…');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     await idbSet('data', JSON.parse(JSON.stringify(DATA)));
     await idbSet('pending', Object.fromEntries(pending));
-    if (st) st.textContent = 'draft saved in this browser';
+    markStatus('NOT PUBLISHED YET — draft saved in this browser');
   }, 400);
 }
 
@@ -121,8 +135,7 @@ async function clearDraft() {
   await idbDel('pending');
   pending.clear();
   dirty = false;
-  const fab = $('#editFab');
-  if (fab) fab.dataset.dirty = 'false';
+  markStatus('published');
 }
 
 /* ================================================================== GitHub */
@@ -205,7 +218,10 @@ function askToken() {
 
 async function doPublish() {
   if (!dirty && !pending.size) { toast('Nothing to publish yet.'); return; }
-  if (!token() && !(await askToken())) return;
+  if (!token() && !(await askToken())) {
+    toast('Nothing was published. Your changes are still here — use "Save & Download" instead.', 'err', 9000);
+    return;
+  }
   const btn = $('#publishBtn');
   const old = btn ? btn.textContent : '';
   if (btn) { btn.textContent = 'Publishing…'; btn.disabled = true; }
@@ -215,8 +231,6 @@ async function doPublish() {
     );
     ORIGINAL = JSON.parse(JSON.stringify(DATA));
     await clearDraft();
-    const st = $('#saveState');
-    if (st) st.textContent = 'published';
     toast(`Published ${sha.slice(0, 7)}. The live site updates in about a minute.`, 'ok', 8000);
   } catch (err) {
     toast(String(err.message || err), 'err', 10000);
@@ -388,6 +402,17 @@ function bindInline() {
   });
 }
 
+/** Scroll to a card and pulse it, so a save is visibly a save. */
+function flashCard(id) {
+  requestAnimationFrame(() => {
+    const card = document.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
+    if (!card) return;
+    card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    card.classList.add('just-saved');
+    setTimeout(() => card.classList.remove('just-saved'), 2400);
+  });
+}
+
 /* =============================================================== modals */
 function modal(title, sub, bodyHTML, actions) {
   const wrap = document.createElement('div');
@@ -540,12 +565,29 @@ function openProject(id) {
         draft.image = R.projThumb(draft) || '';
         if (isNew) DATA.projects.unshift(draft);
         else Object.assign(DATA.projects.find((x) => x.id === id), draft);
+
+        // If a category filter is active and the project does not match it, the
+        // card would be created and then immediately hidden. Move the filter to
+        // where the project actually is.
+        if (state.filter !== 'All' && state.filter !== draft.category) {
+          state.filter = DATA.categories.includes(draft.category) ? draft.category : 'All';
+        }
+
         w.remove(); persist(); renderAll();
-        toast(isNew ? 'Project added.' : 'Project updated.');
+        flashCard(draft.id);
+        toast(isNew
+          ? 'Project added — remember to Publish, it is not live yet.'
+          : 'Project updated — remember to Publish, it is not live yet.', 'ok', 7000);
       } },
   ]);
 
   function paintCats() {
+    // Older data can carry a category that never made it into the filter list.
+    // Register it rather than quietly reassigning the project to another one.
+    if (draft.category && !DATA.categories.includes(draft.category)) {
+      DATA.categories.push(draft.category);
+      persist();
+    }
     const cats = DATA.categories.filter((c) => c !== 'All');
     if (!cats.includes(draft.category) && cats.length) draft.category = cats[0];
     $('#pmCategory', m).innerHTML = cats
@@ -755,9 +797,8 @@ async function unlock() {
     Object.assign(DATA, draft);
     if (savedPending) Object.entries(savedPending).forEach(([k, v]) => pending.set(k, v));
     dirty = true;
-    const st = $('#saveState');
-    if (st) st.textContent = 'unpublished draft restored';
-    toast('Restored the draft you were working on in this browser.', 'ok', 6000);
+    markStatus('NOT PUBLISHED YET — draft restored');
+    toast('Restored the draft you were working on in this browser. It is not live yet — press Publish, or Save & Download.', 'ok', 9000);
   }
 
   renderAll();
@@ -765,8 +806,7 @@ async function unlock() {
   if (!token()) {
     toast('Editing without a GitHub token. When you are done, use "Save & Download" and then PUBLISH.bat.', 'ok', 9000);
   }
-  const fab = $('#editFab');
-  if (fab) fab.dataset.dirty = dirty ? 'true' : 'false';
+  markStatus();
 }
 
 function askUnlock() {

@@ -568,3 +568,12 @@ body[data-edit-on] [data-field][contenteditable="true"]:focus { outline-style: s
 
 /* Leave room under the title for the per-card Edit / ✕ buttons in owner mode. */
 body[data-edit-on] .card .meta { padding-bottom: 2.7rem; }
+
+/* A saved project pulses so the owner can see where it landed. */
+.card.just-saved { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold-wash), 0 20px 44px -26px rgba(0,0,0,.95); }
+.card.just-saved .corner { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+
+/* Unpublished work is called out, not implied. */
+.edit-toolbar[data-dirty="true"] { border-bottom-color: var(--danger); }
+.edit-toolbar[data-dirty="true"] .status { color: var(--danger); }
+.edit-toolbar[data-dirty="true"] #saveState { opacity: 1 !important; font-weight: 600; }
