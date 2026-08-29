@@ -10,8 +10,11 @@ if not exist "index.html" (
 
 echo Opening your portfolio in the browser...
 echo.
-echo This is the version on YOUR computer, not the live one.
-echo When it looks right, double-click PUBLISH.bat to put it online.
+echo This is the copy on YOUR computer, not the live website.
+echo Everything works here - menu, filters, search, project galleries
+echo and Owner edit.
+echo.
+echo When it looks right, double-click push.bat to publish it.
 echo.
 start "" "%CD%\index.html"
-timeout /t 3 >nul
+timeout /t 4 >nul

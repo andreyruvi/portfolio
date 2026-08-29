@@ -25,7 +25,8 @@ import { makeZip, textBytes, base64Bytes, download } from './zip.js';
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-const LS_OWNER = 'pf.owner';
+const LS_OWNER = 'pf.owner';       // remembers across visits: show the prompt
+const SS_UNLOCKED = 'pf.unlocked'; // remembers within this tab: skip the prompt
 const DB_NAME = 'pf-portfolio', STORE = 'kv';
 
 let unlocked = false;
@@ -650,6 +651,7 @@ function toolbar() {
   $('#tbExit').addEventListener('click', () => {
     if (dirty && !confirm('You have changes that are not downloaded yet. Leave edit mode anyway?')) return;
     localStorage.removeItem(LS_OWNER);
+    try { sessionStorage.removeItem(SS_UNLOCKED); } catch { /* ignore */ }
     location.hash = '';
     location.reload();
   });
@@ -684,6 +686,9 @@ async function unlock() {
   unlocked = true;
   state.editing = true;
   localStorage.setItem(LS_OWNER, '1');
+  // The site is five pages. Asking for the password again on every navigation
+  // would be unusable, so one unlock covers the whole browser session.
+  try { sessionStorage.setItem(SS_UNLOCKED, '1'); } catch { /* private mode */ }
   document.body.setAttribute('data-edit-on', '');
   toolbar();
 
@@ -731,5 +736,8 @@ export function init() {
     if (dirty || pending.size) { e.preventDefault(); e.returnValue = ''; }
   });
 
-  if (localStorage.getItem(LS_OWNER) === '1') askUnlock();
+  let already = false;
+  try { already = sessionStorage.getItem(SS_UNLOCKED) === '1'; } catch { /* private mode */ }
+  if (already) unlock();
+  else if (localStorage.getItem(LS_OWNER) === '1') askUnlock();
 }

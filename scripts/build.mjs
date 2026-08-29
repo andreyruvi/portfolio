@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildAll, siteUrlOf, PAGES } from '../js/page.js';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => JSON.parse(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
@@ -66,6 +67,11 @@ function highest(dir, stem) {
   return max;
 }
 site.counters = { img: highest('images', 'img'), doc: highest('files', 'doc') };
+
+/* ----------------------------------------------------------------- bundle */
+/* The browser gets one classic script, so the pages also work when opened
+   straight from the folder. See scripts/bundle.mjs for why. */
+execFileSync(process.execPath, [path.join(ROOT, 'scripts/bundle.mjs')], { stdio: 'inherit' });
 
 /* ------------------------------------------------------------------ write */
 const pages = buildAll(site, { dims: sizeAttrs });

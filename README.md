@@ -135,8 +135,10 @@ portfolio/
 │   ├── app.js            Menu, reveal, filter, search, lightbox
 │   ├── render.js         The markup for each section, shared with the build
 │   ├── page.js           Assembles the pages, shared with the build
-│   ├── editor.js         Owner mode (only downloaded when you click it)
-│   └── zip.js            Builds the Save & Download archive
+│   ├── editor.js         Owner mode
+│   ├── zip.js            Builds the Save & Download archive
+│   └── bundle.js         GENERATED — the five files above, packed into one
+│                         script. This is what the pages actually load.
 │
 ├── data/
 │   ├── site.json         Name, headline, about text, stats, tools, contact, SEO
@@ -148,6 +150,7 @@ portfolio/
 │
 ├── scripts/
 │   ├── build.mjs         Regenerates the HTML from the data files
+│   ├── bundle.mjs        Packs js/*.js into js/bundle.js
 │   └── optimize-images.mjs  Converts new PNG/JPG to WebP
 │
 ├── push.bat              Publish to GitHub
@@ -222,3 +225,8 @@ confirm the image paths exist exactly as written, including capital letters.
   history at commit `94dddbb`. Nothing was lost when they were converted.
 - **Node.js** is only needed if you edit the JSON by hand and want to rebuild
   locally. Owner mode and `push.bat` do not need it.
+- **`js/bundle.js` is generated.** Edit the individual files in `js/`, then run
+  `npm run build`, which rebuilds the bundle and the pages together. The pages
+  load the bundle rather than the modules because a `type="module"` script is
+  blocked when a page is opened straight from a folder — which would leave
+  `PREVIEW.bat` showing a site where nothing is clickable.

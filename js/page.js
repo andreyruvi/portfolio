@@ -462,7 +462,7 @@ ${LIGHTBOX}
 <button class="edit-fab" id="editFab" type="button" title="Owner login">🔒 Owner edit</button>
 
 <script type="application/json" id="site-data">${JSON.stringify(site).replace(/</g, '\\u003c')}</script>
-<script type="module" src="js/app.js"></script>
+<script src="js/bundle.js" defer></script>
 </body>
 </html>
 `;
