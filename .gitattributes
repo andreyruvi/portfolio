@@ -1,0 +1,13 @@
+# Batch files MUST keep CRLF line endings or Windows misparses labels and
+# goto targets. Pin them explicitly so a machine with core.autocrlf=false
+# still checks them out correctly.
+*.bat  text eol=crlf
+
+# Everything else is LF in the repository.
+*       text=auto eol=lf
+
+# Binaries: never touch.
+*.webp binary
+*.png  binary
+*.jpg  binary
+*.pdf  binary

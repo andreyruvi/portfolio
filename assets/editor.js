@@ -16,6 +16,7 @@
    ========================================================================== */
 import * as R from './render.js';
 import { DATA, state, renderWork, observeReveal, paintImages, setupCoverFlow } from './app.js';
+import { makeZip, textBytes, base64Bytes, download } from './zip.js';
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -184,8 +185,27 @@ async function publishToGitHub(message) {
   return commit.sha;
 }
 
+/** Ask for a token only when one is actually required. */
+function askToken() {
+  return new Promise((resolve) => {
+    modal('GitHub token needed',
+      'Publishing straight from the browser needs a token. If you would rather not use one, press Cancel and use "Save & Download" instead.', `
+      <label>GitHub token</label>
+      <input id="tkIn" type="password" autocomplete="off" placeholder="github_pat_…">`, [
+      { label: 'Cancel', onClick: (m) => { m.remove(); resolve(false); } },
+      { label: 'Save token', primary: true, onClick: (m) => {
+          const t = $('#tkIn', m).value.trim();
+          if (!t) { toast('Paste the token first.', 'err'); return; }
+          localStorage.setItem(LS_TOKEN, t);
+          m.remove(); resolve(true);
+        } },
+    ]);
+  });
+}
+
 async function doPublish() {
   if (!dirty && !pending.size) { toast('Nothing to publish yet.'); return; }
+  if (!token() && !(await askToken())) return;
   const btn = $('#publishBtn');
   const old = btn ? btn.textContent : '';
   if (btn) { btn.textContent = 'Publishing…'; btn.disabled = true; }
@@ -203,6 +223,24 @@ async function doPublish() {
   } finally {
     if (btn) { btn.textContent = old; btn.disabled = false; }
   }
+}
+
+/* ================================================= save & download (no token) */
+/**
+ * The manual route: hand over the edited content as a file to drop into the
+ * portfolio folder, then publish with PUBLISH.bat. No GitHub token involved.
+ */
+function saveAndDownload() {
+  const json = JSON.stringify(DATA, null, 2);
+  if (!pending.size) {
+    download(new Blob([json], { type: 'application/json' }), 'site.json');
+    toast('Saved site.json — put it in your portfolio folder under data\\, replacing the old one, then run PUBLISH.bat.', 'ok', 12000);
+    return;
+  }
+  const files = [{ name: 'data/site.json', bytes: textBytes(json) }];
+  for (const [path, b64] of pending) files.push({ name: path, bytes: base64Bytes(b64) });
+  download(makeZip(files), 'portfolio-content.zip');
+  toast(`Saved portfolio-content.zip with your new photos. Extract it INTO your portfolio folder, overwriting when asked, then run PUBLISH.bat.`, 'ok', 14000);
 }
 
 /* ============================================================ image intake */
@@ -644,6 +682,7 @@ function toolbar() {
     <button type="button" id="tbAvatar">⟲ Change photo</button>
     <button type="button" id="tbKey">Change password</button>
     <button type="button" id="tbReset">↺ Reset to file</button>
+    <button type="button" id="tbDownload">⤓ Save &amp; Download</button>
     <button type="button" class="save" id="publishBtn">💾 Publish to GitHub</button>
     <button type="button" id="tbExit">Exit</button>`;
   document.body.appendChild(bar);
@@ -669,6 +708,7 @@ function toolbar() {
       toast('Back to the published version.');
     });
   });
+  $('#tbDownload').addEventListener('click', saveAndDownload);
   $('#publishBtn').addEventListener('click', doPublish);
   $('#tbExit').addEventListener('click', () => {
     if (dirty && !confirm('You have unpublished changes. Leave edit mode anyway?')) return;
@@ -722,22 +762,24 @@ async function unlock() {
 
   renderAll();
   $$('.hint').forEach((h) => h.setAttribute('data-show', ''));
+  if (!token()) {
+    toast('Editing without a GitHub token. When you are done, use "Save & Download" and then PUBLISH.bat.', 'ok', 9000);
+  }
   const fab = $('#editFab');
   if (fab) fab.dataset.dirty = dirty ? 'true' : 'false';
 }
 
 function askUnlock() {
-  modal('Owner login', 'Your GitHub token stays in this browser only. On a shared computer, press Exit when you finish.', `
+  modal('Owner login', 'The password just opens editing. A GitHub token is optional — it is only needed to publish straight from the browser.', `
       <label>Password</label>
       <input id="uKey" type="password" autocomplete="current-password">
-      <label>GitHub token${token() ? ' — saved, leave blank to reuse' : ''}</label>
-      <input id="uTok" type="password" autocomplete="off" placeholder="github_pat_…">`, [
+      <label>GitHub token — optional${token() ? ', already saved' : ''}</label>
+      <input id="uTok" type="password" autocomplete="off" placeholder="leave blank to edit without publishing">`, [
     { label: 'Cancel', onClick: (m) => m.remove() },
     { label: 'Unlock', primary: true, onClick: (m) => {
         if ($('#uKey', m).value !== (DATA.editor?.editKey || '')) { toast('Wrong password.', 'err'); return; }
         const t = $('#uTok', m).value.trim();
         if (t) localStorage.setItem(LS_TOKEN, t);
-        if (!token()) { toast('A GitHub token is needed to publish.', 'err'); return; }
         m.remove();
         unlock();
       } },
@@ -758,5 +800,5 @@ export function init() {
     if (dirty || pending.size) { e.preventDefault(); e.returnValue = ''; }
   });
 
-  if (localStorage.getItem(LS_OWNER) === '1' && token()) askUnlock();
+  if (localStorage.getItem(LS_OWNER) === '1') askUnlock();
 }

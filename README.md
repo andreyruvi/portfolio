@@ -78,6 +78,29 @@ GitHub does that step for you on every push.
 
 ---
 
+## Two ways to publish
+
+**A — from the browser (needs a token).** Press **Publish to GitHub** in owner mode.
+One click, done in about a minute.
+
+**B — manually (no token).** Edit in the browser, press **⤓ Save & Download**, drop
+the file into this folder, then double-click `PUBLISH.bat`.
+
+- With no new photos you get `site.json` → replace `data/site.json` with it.
+- With new photos you get `portfolio-content.zip` → extract it *into* the
+  portfolio folder, overwriting when asked. It already contains the right
+  `data/` and `images/` paths.
+
+## Your password
+
+Owner mode opens with the password in `data/site.json` (`editor.editKey`).
+Change it from **Change password** in the edit toolbar, then publish.
+
+Note that this password sits in a public file, so treat it as a lock on the
+door rather than a secret — it stops a visitor idly clicking into edit mode, and
+nothing more. The real protection is the GitHub token: without one, nobody can
+change what is published, no matter what they type into the page.
+
 ## Your GitHub token
 
 The **Publish** button needs a token so the browser can write to this repository.
@@ -89,8 +112,8 @@ Create one at
 - **Permissions:** Contents → *Read and write*
 - **Expiration:** 90 days (make a new one when it expires)
 
-The token is stored only in your browser's local storage. It is never written into
-this repository. If you use a shared or public computer, press **Sign out** when you
+The token is optional — you only need it for route A. It is stored only in your
+browser's local storage and is never written into this repository. If you use a shared or public computer, press **Sign out** when you
 finish, or revoke the token from that same settings page.
 
 ---
