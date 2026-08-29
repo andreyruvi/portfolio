@@ -1,269 +1,279 @@
 /* =============================================================================
-   app.js — interactivity for the public site.
-   The page is already fully rendered by scripts/build.mjs; this file only adds
-   behaviour, so the content is visible even if this script never loads.
+   app.js — behaviour for the public site.
+   The page arrives fully rendered from scripts/build.mjs, so everything here is
+   enhancement: it re-renders only when the visitor changes the filter.
    ========================================================================== */
-(() => {
-  'use strict';
+import * as R from './render.js';
 
-  const $  = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-  const DATA = (() => {
-    const el = document.getElementById('site-data');
-    try { return el ? JSON.parse(el.textContent) : null; }
-    catch { return null; }
-  })();
-  window.SITE = DATA;
+export const DATA = (() => {
+  const el = document.getElementById('site-data');
+  try { return el ? JSON.parse(el.textContent) : null; } catch { return null; }
+})();
 
-  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+export const state = { filter: 'All', editing: false };
 
-  /* ------------------------------------------------------ scroll progress */
-  const progress = $('#progress');
-  const head = $('#siteHead');
-  let ticking = false;
+/* ------------------------------------------------------ scroll + chrome */
+const progress = $('#progress');
+const head = $('#siteHead');
+let ticking = false;
+function onScroll() {
+  if (ticking) return;
+  ticking = true;
+  requestAnimationFrame(() => {
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    if (progress) progress.style.transform = `scaleX(${max > 0 ? window.scrollY / max : 0})`;
+    if (head) head.dataset.stuck = window.scrollY > 8 ? 'true' : 'false';
+    ticking = false;
+  });
+}
+window.addEventListener('scroll', onScroll, { passive: true });
+onScroll();
 
-  function onScroll() {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(() => {
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      const y = window.scrollY;
-      if (progress) progress.style.transform = `scaleX(${max > 0 ? y / max : 0})`;
-      if (head) head.dataset.stuck = y > 8 ? 'true' : 'false';
-      ticking = false;
-    });
-  }
-  window.addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
+const sections = ['about', 'services', 'work', 'contact'].map((id) => document.getElementById(id)).filter(Boolean);
+if (sections.length && 'IntersectionObserver' in window) {
+  const links = new Map($$('.nav a').map((a) => [a.getAttribute('href').slice(1), a]));
+  const spy = new IntersectionObserver(
+    (es) => es.forEach((e) => {
+      const l = links.get(e.target.id);
+      if (l) l.setAttribute('aria-current', e.isIntersecting ? 'true' : 'false');
+    }),
+    { rootMargin: '-45% 0px -50% 0px' }
+  );
+  sections.forEach((s) => spy.observe(s));
+}
 
-  /* --------------------------------------------------------- nav highlight */
-  const sections = ['about', 'services', 'work', 'contact']
-    .map((id) => document.getElementById(id))
-    .filter(Boolean);
-
-  if (sections.length && 'IntersectionObserver' in window) {
-    const links = new Map($$('.nav a').map((a) => [a.getAttribute('href').slice(1), a]));
-    const spy = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((e) => {
-          const link = links.get(e.target.id);
-          if (link) link.setAttribute('aria-current', e.isIntersecting ? 'true' : 'false');
-        });
-      },
-      { rootMargin: '-45% 0px -50% 0px' }
-    );
-    sections.forEach((s) => spy.observe(s));
-  }
-
-  /* ---------------------------------------------------------- reveal on scroll */
-  const risers = $$('.rise');
-  if (!risers.length) { /* nothing to do */ }
-  else if (reduceMotion || !('IntersectionObserver' in window)) {
+/* -------------------------------------------------------------- reveal */
+let revealObserver = null;
+export function observeReveal() {
+  const risers = $$('.rise:not(.in)');
+  if (reduceMotion || !('IntersectionObserver' in window)) {
     risers.forEach((el) => el.classList.add('in'));
-  } else {
-    const io = new IntersectionObserver(
-      (entries, obs) => {
-        entries.forEach((e) => {
-          if (!e.isIntersecting) return;
-          e.target.classList.add('in');
-          obs.unobserve(e.target);
-        });
-      },
+    return;
+  }
+  if (!revealObserver) {
+    revealObserver = new IntersectionObserver(
+      (es, obs) => es.forEach((e) => {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('in');
+        obs.unobserve(e.target);
+      }),
       { rootMargin: '0px 0px -8% 0px', threshold: 0.05 }
     );
-    risers.forEach((el) => io.observe(el));
   }
+  risers.forEach((el) => revealObserver.observe(el));
+}
 
-  /* ------------------------------------------------------------ hero slides */
-  const heroMedia = $('#heroMedia');
-  if (heroMedia) {
-    const slides = $$('img', heroMedia);
-    slides.forEach((img) => {
-      if (img.complete) img.classList.add('on-loaded');
-      img.addEventListener('load', () => img.classList.add('on-loaded'), { once: true });
-    });
-    if (slides.length > 1 && !reduceMotion) {
-      let i = 0;
-      setInterval(() => {
-        slides[i].classList.remove('on');
-        i = (i + 1) % slides.length;
-        slides[i].classList.add('on');
-      }, 6500);
-    }
-  }
-
-  /* ------------------------------------------------------- service expanders */
-  $$('.svc-toggle').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const card = btn.closest('.svc');
-      const open = card.dataset.open === 'true';
-      card.dataset.open = open ? 'false' : 'true';
-      btn.setAttribute('aria-expanded', String(!open));
-      btn.firstChild.nodeValue = open
-        ? btn.dataset.labelClosed || btn.firstChild.nodeValue
-        : 'Show less';
-    });
-    btn.dataset.labelClosed = btn.firstChild.nodeValue;
-  });
-
-  /* -------------------------------------------------------------- filters */
-  const gallery = $('#gallery');
-  const cards = $$('.card', gallery || document);
-
-  $$('.filters button').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const cat = btn.dataset.cat;
-      $$('.filters button').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
-      let shown = 0;
-      cards.forEach((card) => {
-        const match = cat === 'All' || card.dataset.cat === cat;
-        card.hidden = !match;
-        if (match) shown++;
-      });
-      let empty = $('.empty', gallery);
-      if (!shown) {
-        if (!empty) {
-          empty = document.createElement('p');
-          empty.className = 'empty';
-          gallery.appendChild(empty);
-        }
-        empty.textContent = `No projects in “${cat}” yet.`;
-        empty.hidden = false;
-      } else if (empty) {
-        empty.hidden = true;
-      }
-    });
-  });
-
-  /* ------------------------------------------------------------- lightbox */
-  const lb       = $('#lightbox');
-  const lbImage  = $('#lbImage');
-  const lbTitle  = $('#lbTitle');
-  const lbCat    = $('#lbCat');
-  const lbDesc   = $('#lbDesc');
-  const lbStrip  = $('#lbStrip');
-  const lbCount  = $('#lbCounter');
-
-  let media = [];
-  let index = 0;
-  let lastFocus = null;
-
-  const thumbOf = (src) =>
-    src.startsWith('images/') ? `images/thumb/${src.slice(7)}` : src;
-
-  function show(i) {
-    if (!media.length) return;
-    index = (i + media.length) % media.length;
-    const src = media[index].src;
-    lbImage.classList.remove('on');
-    const pre = new Image();
-    pre.onload = () => {
-      lbImage.src = src;
-      lbImage.alt = `${lbTitle.textContent} — image ${index + 1} of ${media.length}`;
-      lbImage.classList.add('on');
-    };
-    pre.onerror = () => { lbImage.src = src; lbImage.classList.add('on'); };
-    pre.src = src;
-
-    lbCount.textContent = `${String(index + 1).padStart(2, '0')} / ${String(media.length).padStart(2, '0')}`;
-    $$('button', lbStrip).forEach((b, n) => b.setAttribute('aria-current', String(n === index)));
-    const active = lbStrip.children[index];
-    if (active) active.scrollIntoView({ block: 'nearest', inline: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
-
-    // Warm the neighbours so paging feels instant.
-    [index + 1, index - 1].forEach((n) => {
-      const m = media[(n + media.length) % media.length];
-      if (m) new Image().src = m.src;
-    });
-  }
-
-  function openProject(id) {
-    if (!DATA) return;
-    const project = DATA.projects.find((p) => p.id === id);
-    if (!project) return;
-
-    media = (project.media && project.media.length
-      ? project.media
-      : [{ src: project.image }]).filter((m) => m && m.src);
-    if (!media.length) return;
-
-    lbTitle.textContent = project.title;
-    lbCat.textContent = project.category || '';
-    lbDesc.textContent = (project.desc || '').trim();
-
-    lbStrip.innerHTML = media
-      .map(
-        (m, i) =>
-          `<button type="button" aria-label="Image ${i + 1}" aria-current="${i === 0}">` +
-          `<img src="${thumbOf(m.src)}" alt="" loading="lazy"></button>`
-      )
-      .join('');
-    $$('button', lbStrip).forEach((b, i) => b.addEventListener('click', () => show(i)));
-
-    lastFocus = document.activeElement;
-    lb.hidden = false;
-    requestAnimationFrame(() => { lb.dataset.open = 'true'; });
-    document.body.style.overflow = 'hidden';
-    show(0);
-    $('#lbClose').focus();
-  }
-
-  function closeLightbox() {
-    lb.dataset.open = 'false';
-    document.body.style.overflow = '';
-    setTimeout(() => { lb.hidden = true; lbImage.removeAttribute('src'); }, 300);
-    if (lastFocus) lastFocus.focus();
-  }
-
-  cards.forEach((card) => card.addEventListener('click', () => openProject(card.dataset.id)));
-  $('#lbClose')?.addEventListener('click', closeLightbox);
-  $('#lbPrev')?.addEventListener('click', () => show(index - 1));
-  $('#lbNext')?.addEventListener('click', () => show(index + 1));
-  lb?.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });
-
-  document.addEventListener('keydown', (e) => {
-    if (lb?.dataset.open !== 'true') return;
-    if (e.key === 'Escape') closeLightbox();
-    else if (e.key === 'ArrowRight') show(index + 1);
-    else if (e.key === 'ArrowLeft') show(index - 1);
-  });
-
-  // Swipe on touch devices.
-  let touchX = null;
-  $('#lbStage')?.addEventListener('touchstart', (e) => { touchX = e.touches[0].clientX; }, { passive: true });
-  $('#lbStage')?.addEventListener('touchend', (e) => {
-    if (touchX === null) return;
-    const dx = e.changedTouches[0].clientX - touchX;
-    if (Math.abs(dx) > 45) show(index + (dx < 0 ? 1 : -1));
-    touchX = null;
-  }, { passive: true });
-
-  /* ------------------------------------------- fade images in as they load */
-  $$('img[loading="lazy"], .hero-media img, .card-media img').forEach((img) => {
+/** Fade images in once decoded, so a slow photo never flashes half-drawn. */
+export function paintImages(root = document) {
+  $$('.thumb, .cover-slide', root).forEach((img) => {
     if (img.complete) img.classList.add('on');
     else img.addEventListener('load', () => img.classList.add('on'), { once: true });
   });
+}
 
-  /* ----------------------------------------------------------- owner mode */
-  // The editor is a separate file and is only fetched when the owner asks for
-  // it: visit the site with #edit, or press Ctrl+Shift+E.
-  let editorLoading = false;
-  function loadEditor() {
-    if (editorLoading || window.PortfolioEditor) return;
-    editorLoading = true;
-    const s = document.createElement('script');
-    s.src = 'assets/editor.js';
-    s.onload = () => window.PortfolioEditor?.init(DATA);
-    s.onerror = () => { editorLoading = false; };
-    document.body.appendChild(s);
+/* -------------------------------------------------------- cover slides */
+let coverTimer = null;
+export function setupCoverFlow() {
+  const slides = $$('#coverSlides .cover-slide');
+  clearInterval(coverTimer);
+  if (slides.length < 2 || reduceMotion) return;
+  let i = 0;
+  coverTimer = setInterval(() => {
+    slides[i].classList.remove('active');
+    i = (i + 1) % slides.length;
+    slides[i].classList.add('active');
+  }, 6500);
+}
+
+/* ------------------------------------------------------------ gallery */
+export function renderWork() {
+  const gallery = $('#gallery');
+  const filters = $('#filters');
+  if (!gallery || !filters) return;
+  filters.innerHTML = R.renderFilters(DATA, state.filter, state.editing);
+  gallery.innerHTML = R.renderGallery(DATA, state.filter, state.editing);
+  paintImages(gallery);
+  observeReveal();
+  $$('.rise', gallery).forEach((el) => el.classList.add('in'));
+}
+
+document.addEventListener('click', (e) => {
+  const f = e.target.closest('#filters [data-f]');
+  if (f) {
+    state.filter = f.getAttribute('data-f');
+    renderWork();
+    return;
+  }
+  const card = e.target.closest('.card');
+  if (card && !state.editing && !e.target.closest('.card-tools')) openLb(card.dataset.id);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const card = e.target.closest?.('.card');
+  if (card && !state.editing) { e.preventDefault(); openLb(card.dataset.id); }
+});
+
+/* ----------------------------------------------------------- lightbox */
+const lb       = $('#lightbox');
+const lbStage  = $('#lbStage');
+const lbStrip  = $('#lbStrip');
+const lbBar    = $('#lbBar');
+const lbCount  = $('#lbCount');
+const lbPlayBtn = $('#lbPlayBtn');
+const lbControls = $('#lbControls');
+
+let media = [];
+let index = 0;
+let playing = false;
+let hoverPause = false;
+let autoTimer = null;
+let lastFocus = null;
+const INTERVAL = 4200;
+
+const imageCount = () => media.filter((m) => !R.isPdf(m)).length;
+
+function updatePlayBtn() {
+  if (lbPlayBtn) lbPlayBtn.textContent = playing ? '⏸' : '▶';
+}
+
+function scheduleAuto() {
+  clearTimeout(autoTimer);
+  if (!lbBar) return;
+  lbBar.classList.remove('run');
+  lbBar.style.animation = 'none';
+  lbBar.style.width = '0';
+  const cur = media[index];
+  if (!(playing && cur && !R.isPdf(cur) && imageCount() > 1)) return;
+  void lbBar.offsetWidth;                       // reflow so the bar restarts
+  lbBar.style.animation = '';
+  lbBar.style.setProperty('--dur', INTERVAL + 'ms');
+  lbBar.classList.add('run');
+  lbBar.style.animationPlayState = hoverPause ? 'paused' : 'running';
+  if (!hoverPause) autoTimer = setTimeout(() => show(index + 1), INTERVAL);
+}
+
+function show(i) {
+  if (!media.length) return;
+  index = (i + media.length) % media.length;
+  const m = media[index];
+  const openBox = $('#lbOpen');
+
+  if (R.isPdf(m)) {
+    lbStage.innerHTML = `<div class="lb-frame"><iframe class="lb-pdf" src="${R.attr(m.src)}" title="${R.attr($('#lbTitle').textContent)}"></iframe></div>`;
+    openBox.innerHTML = `<a class="btn" href="${R.attr(m.src)}" target="_blank" rel="noopener">⤓ Open / download PDF</a>`;
+  } else {
+    lbStage.innerHTML = `<div class="lb-frame"><img src="${R.attr(m.src)}" alt="${R.attr($('#lbTitle').textContent)} — image ${index + 1} of ${media.length}"></div>`;
+    openBox.innerHTML = `<a class="btn" href="${R.attr(m.src)}" target="_blank" rel="noopener">⤢ Open full image</a>`;
   }
 
-  if (location.hash === '#edit' || localStorage.getItem('pf.owner') === '1') loadEditor();
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
-      e.preventDefault();
-      loadEditor();
-    }
+  $$('.lb-thumb', lbStrip).forEach((t, n) => t.classList.toggle('active', n === index));
+  const active = lbStrip.children[index];
+  if (active) active.scrollIntoView({ block: 'nearest', inline: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+  if (lbCount) lbCount.textContent = `${index + 1} / ${media.length}`;
+
+  // Warm the neighbours so paging feels instant.
+  [index + 1, index - 1].forEach((n) => {
+    const nb = media[(n + media.length) % media.length];
+    if (nb && !R.isPdf(nb)) new Image().src = nb.src;
   });
-})();
+
+  scheduleAuto();
+}
+
+export function openLb(id) {
+  const pr = DATA?.projects.find((p) => p.id === id);
+  if (!pr) return;
+  media = (pr.media && pr.media.length ? pr.media : [{ type: 'image', src: pr.image }]).filter((m) => m && m.src);
+  if (!media.length) return;
+
+  $('#lbCat').textContent = pr.category || '';
+  $('#lbTitle').textContent = pr.title;
+  $('#lbDesc').textContent = R.cleanText(pr.desc);
+
+  lbStrip.innerHTML = media
+    .map((m, i) =>
+      R.isPdf(m)
+        ? `<div class="lb-thumb pdf" data-lbi="${i}" role="button" tabindex="0">PDF</div>`
+        : `<img class="lb-thumb" src="${R.attr(R.thumbOf(m.src))}" data-lbi="${i}" alt="" loading="lazy">`
+    )
+    .join('');
+  lbStrip.style.display = media.length > 1 ? 'flex' : 'none';
+  lbControls.style.display = media.length > 1 ? 'flex' : 'none';
+
+  playing = imageCount() > 1 && !reduceMotion;
+  updatePlayBtn();
+
+  lastFocus = document.activeElement;
+  lb.hidden = false;
+  requestAnimationFrame(() => { lb.dataset.open = 'true'; });
+  document.body.style.overflow = 'hidden';
+  show(0);
+  $('#lbClose').focus();
+}
+
+function closeLb() {
+  clearTimeout(autoTimer);
+  playing = false;
+  lb.dataset.open = 'false';
+  document.body.style.overflow = '';
+  setTimeout(() => { lb.hidden = true; lbStage.innerHTML = ''; }, 300);
+  if (lastFocus) lastFocus.focus();
+}
+
+$('#lbClose')?.addEventListener('click', closeLb);
+$('#lbPrev')?.addEventListener('click', () => show(index - 1));
+$('#lbNext')?.addEventListener('click', () => show(index + 1));
+lbPlayBtn?.addEventListener('click', () => { playing = !playing; updatePlayBtn(); scheduleAuto(); });
+lbStrip?.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-lbi]');
+  if (t) show(+t.dataset.lbi);
+});
+lb?.addEventListener('click', (e) => { if (e.target === lb || e.target === $('.lb-inner', lb)) closeLb(); });
+lbStage?.addEventListener('mouseenter', () => { hoverPause = true; scheduleAuto(); });
+lbStage?.addEventListener('mouseleave', () => { hoverPause = false; scheduleAuto(); });
+
+document.addEventListener('keydown', (e) => {
+  if (lb?.dataset.open !== 'true') return;
+  if (e.key === 'Escape') closeLb();
+  else if (e.key === 'ArrowRight') show(index + 1);
+  else if (e.key === 'ArrowLeft') show(index - 1);
+  else if (e.key === ' ') { e.preventDefault(); playing = !playing; updatePlayBtn(); scheduleAuto(); }
+});
+
+let touchX = null;
+lbStage?.addEventListener('touchstart', (e) => { touchX = e.touches[0].clientX; }, { passive: true });
+lbStage?.addEventListener('touchend', (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  if (Math.abs(dx) > 45) show(index + (dx < 0 ? 1 : -1));
+  touchX = null;
+}, { passive: true });
+
+/* --------------------------------------------------------- owner mode */
+let editorPromise = null;
+export function loadEditor() {
+  if (!editorPromise) {
+    editorPromise = import('./editor.js')
+      .then((m) => { m.init(); return m; })
+      .catch((err) => { editorPromise = null; throw err; });
+  }
+  return editorPromise;
+}
+
+// The button is visible to everyone, exactly as it was before; the editor code
+// itself is only fetched once someone actually clicks it.
+$('#editFab')?.addEventListener('click', () => loadEditor().then((m) => m.requestUnlock()));
+
+if (location.hash === '#edit' || localStorage.getItem('pf.owner') === '1') loadEditor();
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && (e.key === 'E' || e.key === 'e')) { e.preventDefault(); loadEditor(); }
+});
+
+/* ------------------------------------------------------------- start */
+observeReveal();
+paintImages();
+setupCoverFlow();

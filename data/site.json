@@ -11,10 +11,21 @@
     "available": true,
     "bio": "Thank you for visiting my profile. I bring full skills across Building Architecture, Structural design and MEP, plus Revit parametric family creation and photoreal interior & exterior rendering. I have delivered many permit drawing sets, interior and exterior designs, and 3D modeling projects — and I'm looking to build long-term relationships with clients and studios.",
     "avatar": "images/img-001.webp",
-    "cover": "images/img-002.webp",
+    "cover": "images/img-003.webp",
     "covers": [
       "images/img-003.webp"
     ]
+  },
+  "copy": {
+    "sheetTag": "SHEET A-101 · N.T.S.",
+    "aboutHeading": "About",
+    "toolsHeading": "Software & Tools",
+    "servicesHeading": "Services",
+    "workHeading": "Selected Work",
+    "contactLabel": "04 · Let's build",
+    "contactHeading": "Available for new projects",
+    "contactTagline": "From single permit sets to long-term BIM support — tell me about your building and I'll get back to you fast.",
+    "contactReach": "Reach me directly"
   },
   "tools": [
     "Revit",
