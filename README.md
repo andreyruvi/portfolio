@@ -1,124 +1,224 @@
-# Duong L. — Architectural Design Studio
+# Architectural Design Studio — portfolio website
 
-Portfolio site. Live at **https://andreyruvi.github.io/portfolio/**
+Live at **https://andreyruvi.github.io/portfolio/**
+Repository: `andreyruvi/portfolio`
 
----
-
-## The short version
-
-You never need to touch code.
-
-1. Open the site and add `#edit` to the address:
-   `https://andreyruvi.github.io/portfolio/#edit`
-2. Click **Owner edit**, enter your edit key and your GitHub token.
-3. Change whatever you want — click text to type over it, add projects, add photos.
-4. Click **Publish**.
-5. Wait about a minute. The live site updates by itself.
-
-That's the whole workflow. No downloading, no ZIP files, no `.bat` file, no PC required —
-it works from your phone too.
+A static site. No server, no database, no build step required to publish —
+GitHub Pages serves the HTML files exactly as they are in this folder.
 
 ---
 
-## What you can change in the browser
+## First-time setup
 
-| Button / action | What it does |
+**1. Install Git for Windows** — https://git-scm.com/download/win
+Keep clicking Next; the default options are correct. `push.bat` opens this page
+for you if Git is missing.
+
+**2. Extract this ZIP** anywhere you like. `D:\Working Data\Github\portfolio` is
+fine, so is your Desktop. `push.bat` uses its own folder as the repository, so
+the location does not matter.
+
+**3. Double-click `push.bat`.**
+
+That's it. On the first run it initialises the repository, connects it to
+GitHub, adopts the existing history, then commits and pushes.
+
+### GitHub authentication — once, and never again
+
+The first push opens a GitHub sign-in window in your browser. Sign in and allow
+access. Git for Windows stores the result in Windows Credential Manager and
+never asks again.
+
+There is no password or token in any file in this project, and there should
+never be one. If you are ever asked to paste a token into a file, don't.
+
+If the login window does not appear, or you closed it by accident, just run
+`push.bat` again.
+
+---
+
+## Adding a new project
+
+Three steps.
+
+**1. Put the images in a folder**
+
+```
+images/projects/<anything>/...        or simply images/
+```
+Any filename works. JPG, PNG and WebP are all fine. Large photos are converted
+to WebP automatically on GitHub, so you do not need to resize them first — but a
+20 MB camera file is still a 20 MB upload, so trim the really big ones.
+
+**2. Add the project to `data/projects.json`**
+
+Copy an existing block and change it. Only `id`, `title`, `category` and `media`
+are required; everything else is optional and simply disappears if you leave it
+out.
+
+```json
+{
+  "id": "p2026-riverside",
+  "title": "Riverside Residence — Permit Set",
+  "category": "Permit Drawings",
+  "buildingType": "Residential",
+  "location": "Oregon, USA",
+  "year": "2026",
+  "software": ["Revit", "AutoCAD"],
+  "tags": ["Residential", "Permit Set", "Framing"],
+  "scope": [
+    "Cover sheet and index",
+    "Floor plans and elevations",
+    "Foundation details"
+  ],
+  "description": "One or two sentences about the project and what you produced.",
+  "image": "images/projects/riverside/01.jpg",
+  "media": [
+    { "type": "image", "src": "images/projects/riverside/01.jpg" },
+    { "type": "image", "src": "images/projects/riverside/02.jpg" },
+    { "type": "pdf",   "src": "files/riverside-set.pdf" }
+  ]
+}
+```
+
+- `id` — any unique text, no spaces.
+- `category` — creates the filter chip automatically. Reuse an existing one to
+  group projects together, or invent a new one and a new chip appears.
+- `media` — the first image is the cover shown on the card.
+
+**3. Rebuild and push**
+
+```
+npm run build        (or: node scripts/build.mjs)
+```
+then double-click `push.bat`.
+
+If you do not have Node.js installed, skip the build and use owner mode instead
+— see below. It does the same job in the browser.
+
+---
+
+## The easier way: owner mode
+
+You do not have to touch JSON at all.
+
+1. Open the website and click **Owner edit** at the bottom-right.
+2. Enter your password.
+3. Change anything: click text to edit it, add projects, add and reorder photos,
+   edit services, tools and contact details.
+4. Press **⤓ Save & Download** → you get `portfolio-update.zip`.
+5. Right-click the zip → **Extract All** → extract it **into this folder**,
+   saying yes when Windows asks to replace files.
+6. Double-click `push.bat`.
+
+The zip contains all five finished pages, the three data files and any photos
+you added — already resized to WebP, at the right paths. Extracting it puts
+every file exactly where it belongs.
+
+Your edits auto-save in the browser as you go, so closing the tab loses nothing.
+**Reset to file** throws the draft away and goes back to the published version.
+
+---
+
+## Folder structure
+
+```
+portfolio/
+├── index.html            Home — hero, about, services, featured work
+├── about.html            Experience, process, software
+├── services.html         All eight services in detail
+├── portfolio.html        Full grid with filters, search and project galleries
+├── contact.html          Contact details and what to send
+│
+├── css/style.css         The whole design
+├── js/
+│   ├── app.js            Menu, reveal, filter, search, lightbox
+│   ├── render.js         The markup for each section, shared with the build
+│   ├── page.js           Assembles the pages, shared with the build
+│   ├── editor.js         Owner mode (only downloaded when you click it)
+│   └── zip.js            Builds the Save & Download archive
+│
+├── data/
+│   ├── site.json         Name, headline, about text, stats, tools, contact, SEO
+│   ├── services.json     The service cards
+│   └── projects.json     The portfolio
+│
+├── images/               Full-size photos (WebP)
+│   └── thumb/            Small versions used in the grid
+│
+├── scripts/
+│   ├── build.mjs         Regenerates the HTML from the data files
+│   └── optimize-images.mjs  Converts new PNG/JPG to WebP
+│
+├── push.bat              Publish to GitHub
+├── PREVIEW.bat           Open the site from this folder, before publishing
+└── README.md
+```
+
+### Which file do I edit?
+
+| To change | Edit |
 |---|---|
-| Click any heading, the bio, rate, location, year | Type over it directly |
-| **+ Project** | Pick photos from your computer or phone → creates a new project |
-| Click a project card (in owner mode) | Rename it, change its category, edit its description, add or remove photos, or delete it |
-| **Services** | Edit the six service titles and descriptions |
-| **Cover photo** | Replace the big banner image at the top |
-| **Availability** | Toggle between "Available for work" and "Fully booked" |
-| **Publish** | Sends everything to GitHub and updates the live site |
-| **Sign out** | Removes your token from this browser (do this on shared computers) |
+| A project, or add one | `data/projects.json` |
+| A service | `data/services.json` |
+| Headline, about text, stats, contact details | `data/site.json` |
+| Colours, spacing, fonts | `css/style.css` |
+| Page layout or a new section | `js/page.js` |
+| The password | `data/site.json` → `editor.editKey` |
 
-Photos are shrunk and converted to WebP **in your browser** before upload, so adding a
-50 MB render does not put a 50 MB file in the repository.
+**Never edit the `.html` files by hand.** They are generated. Change the data
+and rebuild, or use owner mode.
 
 ---
 
-## How it works underneath
+## Troubleshooting
 
-```
-data/site.json          ← all the words and image paths. The single source of truth.
-images/*.webp           ← full-size photos (max 1600px)
-images/thumb/*.webp     ← small versions used in the gallery grid
-assets/styles.css       ← the design
-assets/app.js           ← gallery filters, lightbox, scrolling behaviour
-assets/editor.js        ← owner edit mode (only loaded when you ask for it)
-scripts/build.mjs       ← turns site.json into index.html
-scripts/optimize-images.mjs  ← turns any PNG/JPG in images/ into WebP
-.github/workflows/publish.yml ← runs the two scripts on every push
-index.html              ← generated. Do not edit by hand; it gets overwritten.
-```
+**"Git is not installed"**
+`push.bat` opens the download page. Install with default options and run it
+again.
 
-When anything is pushed to `main`, GitHub Actions runs `optimize-images` then `build`,
-and commits the rebuilt `index.html` back. GitHub Pages serves it. That is the
-"automatic" part — pushing *is* deploying.
+**Authentication failed / the login window closed**
+Run `push.bat` again. To reset the saved login: Windows Search → *Credential
+Manager* → *Windows Credentials* → remove the `git:https://github.com` entry,
+then push again and sign in fresh.
 
----
+**"This folder is already connected to a different project"**
+The folder is a different repository. Move it aside and extract the portfolio
+into a fresh folder.
 
-## Running it on your own PC (optional)
+**Push rejected / "failed to push some refs"**
+Something changed on GitHub that you do not have locally. Run `push.bat` again —
+it pulls before pushing, so the second run normally succeeds.
 
-You only need this if you want to preview changes before they go live.
+**GitHub Pages is not updating**
+Wait a minute, then press **Ctrl+F5** to force a reload past the browser cache.
+If it is still stale, check the **Actions** tab on GitHub for a failed run, and
+**Settings → Pages** to confirm the source is branch `main`, folder `/ (root)`.
 
-```bash
-git clone https://github.com/andreyruvi/portfolio.git
-cd portfolio
-node scripts/build.mjs          # rebuild index.html from data/site.json
-npx serve .                     # or: python -m http.server 8000
-```
+**Large image files**
+Anything over about 5 MB makes pushes slow and eats the repository size limit.
+Owner mode resizes photos before they are added; if you drop files in by hand,
+resize them to around 1600 px on the long edge first.
 
-Then open http://localhost:8000
-
-Requires [Node.js](https://nodejs.org) 18+. Image optimisation additionally needs
-[ImageMagick](https://imagemagick.org) — but you do not need it locally, because
-GitHub does that step for you on every push.
+**A project does not appear**
+Check `data/projects.json` opens without an error — a missing comma or bracket
+breaks the whole file. Paste it into <https://jsonlint.com> if in doubt. Then
+confirm the image paths exist exactly as written, including capital letters.
 
 ---
 
-## How to publish
+## Notes and limitations
 
-1. Open the site, click **Owner edit**, enter your password.
-2. Change whatever you want.
-3. Press **⤓ Save & Download** → you get `portfolio-update.zip`.
-4. Extract it **into this folder**, saying yes when Windows asks to replace files.
-5. Double-click `PUBLISH.bat`.
-
-The zip contains a finished `index.html`, the matching `data/site.json`, and any
-photos you added — already resized to WebP, full size and thumbnail, at the
-right paths. Extracting it puts every file exactly where it belongs.
-
-Nothing in the page talks to GitHub. `PUBLISH.bat` does the pushing, using the
-Git login already on your computer.
-
-## Your password
-
-Owner mode opens with the password in `data/site.json` (`editor.editKey`).
-Change it from **Change password** in the edit toolbar, then Save & Download and
-publish.
-
-That file is public, so treat the password as a lock on a door rather than a
-secret: it stops a visitor idly clicking into edit mode. It is not what protects
-the site — pushing requires your GitHub login, which lives on your computer.
-
-## index.html is yours
-
-`index.html` is generated, but it is generated **by you**, in the browser, when
-you press Save & Download. CI will not touch a page you push.
-
-The one exception: if you edit `data/site.json` by hand and push it *without* a
-matching `index.html`, CI regenerates the page so the two cannot disagree. You
-can do the same locally with `npm run build`.
-
----
-
-## Notes
-
-- The original PNG source images live in the git history (commit `94dddbb` and
-  earlier). Nothing was lost; the working tree just carries the WebP versions,
-  which cut the site from 102 MB to 15 MB.
-- `index.html` is generated. If you edit it directly, your change disappears on the
-  next push. Edit `data/site.json` (or use owner mode) instead.
-- To add a category to the filter row, add it to `categories` in `data/site.json`.
+- **`index.html` is yours.** GitHub Actions will not overwrite a page you push.
+  It only regenerates the HTML if `data/*.json` changed *without* matching
+  pages, so the two can never disagree.
+- **The password is public.** It sits in `data/site.json`, which anyone can
+  read. It stops a visitor idly clicking into edit mode; it is not security.
+  What actually protects the site is your GitHub login, which lives on your
+  computer.
+- **Locations and dates** are shown only where they were on the drawings. No
+  client names or street addresses are published.
+- **The original PNG images** (102 MB of them) are still in the repository
+  history at commit `94dddbb`. Nothing was lost when they were converted.
+- **Node.js** is only needed if you edit the JSON by hand and want to rebuild
+  locally. Owner mode and `push.bat` do not need it.

@@ -1,24 +1,32 @@
 #!/usr/bin/env node
 /**
- * build.mjs — writes index.html (plus sitemap.xml and robots.txt) from
- * data/site.json.
+ * build.mjs — generates every page from the data files.
  *
- * The document itself is produced by assets/page.js, the same module the
- * browser uses for "Save & Download", so a page built here and a page saved
- * from the site are identical.
+ *   data/site.json      profile, copy, contact, stats, tools, process, SEO
+ *   data/services.json  the service cards
+ *   data/projects.json  the portfolio
  *
- * You normally never need to run this: owner mode hands you a finished
- * index.html. Run it only if you edited data/site.json by hand.
+ * The pages themselves come from js/page.js, the same module the browser uses
+ * for "Save & Download", so a page built here and a page saved from the site
+ * are the same page.
  *
- *   node scripts/build.mjs      (or: npm run build)
+ * You normally never need to run this — owner mode hands you finished HTML.
+ * Run it after editing the JSON files by hand:
+ *
+ *   node scripts/build.mjs        (or: npm run build)
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildPage, siteUrlOf } from '../assets/page.js';
+import { buildAll, siteUrlOf, PAGES } from '../js/page.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const site = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/site.json'), 'utf8'));
+const read = (rel) => JSON.parse(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+
+/* ------------------------------------------------------------- load data */
+const site = read('data/site.json');
+site.services = read('data/services.json');
+site.projects = read('data/projects.json');
 
 /* --------------------------------------------------- intrinsic image sizes */
 /** Cheap WebP header read so images reserve their space and never shift text. */
@@ -44,9 +52,8 @@ const sizeAttrs = (src) => {
 /* --------------------------------------------------------------- counters */
 /**
  * Owner mode names new files img-NNN / doc-NNN. It can only see what the JSON
- * references, so an unreferenced leftover on disk (img-105.webp and friends)
- * would be silently overwritten by the next upload. Record the real high-water
- * mark from the directories so the browser never reuses a number.
+ * references, so an unreferenced leftover on disk would be silently overwritten
+ * by the next upload. Record the real high-water mark from the directories.
  */
 function highest(dir, stem) {
   let max = 0;
@@ -61,30 +68,35 @@ function highest(dir, stem) {
 site.counters = { img: highest('images', 'img'), doc: highest('files', 'doc') };
 
 /* ------------------------------------------------------------------ write */
-const html = buildPage(site, { dims: sizeAttrs });
-fs.writeFileSync(path.join(ROOT, 'index.html'), html);
+const pages = buildAll(site, { dims: sizeAttrs });
+let bytes = 0;
+for (const [file, html] of Object.entries(pages)) {
+  fs.writeFileSync(path.join(ROOT, file), html);
+  bytes += Buffer.byteLength(html);
+}
 
+/* ------------------------------------------------------- sitemap + robots */
 const url = siteUrlOf(site);
 const today = new Date().toISOString().slice(0, 10);
-fs.writeFileSync(
-  path.join(ROOT, 'sitemap.xml'),
-  `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>${url}</loc><lastmod>${today}</lastmod><changefreq>monthly</changefreq><priority>1.0</priority></url>
-</urlset>
-`
-);
-fs.writeFileSync(
-  path.join(ROOT, 'robots.txt'),
-  `User-agent: *\nAllow: /\n\nSitemap: ${url}sitemap.xml\n`
-);
+const urls = PAGES.map((p) => {
+  const loc = url + (p.file === 'index.html' ? '' : p.file);
+  const priority = p.file === 'index.html' ? '1.0' : p.file === 'portfolio.html' ? '0.9' : '0.7';
+  return `  <url><loc>${loc}</loc><lastmod>${today}</lastmod><changefreq>monthly</changefreq><priority>${priority}</priority></url>`;
+}).join('\n');
+
+fs.writeFileSync(path.join(ROOT, 'sitemap.xml'),
+  `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
+fs.writeFileSync(path.join(ROOT, 'robots.txt'),
+  `User-agent: *\nAllow: /\n\nSitemap: ${url}sitemap.xml\n`);
 
 /* Keep data/site.json in step, so a page saved from the browser and a page
-   built here carry the same counters. */
-fs.writeFileSync(path.join(ROOT, 'data/site.json'), JSON.stringify(site, null, 2) + '\n');
+   built here carry the same counters. Services and projects stay in their own
+   files — this only rewrites the parts site.json owns. */
+const { services, projects, ...siteOnly } = site;
+fs.writeFileSync(path.join(ROOT, 'data/site.json'), JSON.stringify(siteOnly, null, 2) + '\n');
 
 console.log(
-  `built index.html · ${(Buffer.byteLength(html) / 1024).toFixed(1)} KB · ` +
-    `${site.projects.length} projects, ${site.services.length} services, ` +
-    `${site.tools.length} tools · next image img-${String(site.counters.img + 1).padStart(3, '0')}`
+  `built ${Object.keys(pages).length} pages · ${(bytes / 1024).toFixed(1)} KB total · ` +
+  `${site.projects.length} projects, ${site.services.length} services, ${site.tools.length} tools · ` +
+  `next image img-${String(site.counters.img + 1).padStart(3, '0')}`
 );

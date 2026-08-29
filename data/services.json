@@ -1,0 +1,90 @@
+[
+  {
+    "title": "Architectural BIM Modeling",
+    "summary": "Revit models built to a defined level of development, structured so the drawings, schedules and views come out of the model rather than being drawn twice.",
+    "bullets": [
+      "Revit architectural modelling to agreed LOD",
+      "Sheet set-up, views and view templates",
+      "Door, window and room schedules",
+      "Family creation and parametric components",
+      "Model auditing and clean-up of inherited files"
+    ]
+  },
+  {
+    "title": "Permit Drawings",
+    "summary": "Residential and commercial permit sets prepared to submit — coordinated, annotated and code-aware, with revisions turned around quickly.",
+    "bullets": [
+      "Cover sheet, index and general notes",
+      "Floor plans, elevations, sections and details",
+      "Site plans, setbacks and coverage analysis",
+      "Schedules and code compliance annotation",
+      "Revision cycles through plan check"
+    ]
+  },
+  {
+    "title": "CAD Drafting",
+    "summary": "Precise AutoCAD drafting from sketches, markups, PDFs or field measurements, delivered on your layer standard and title block.",
+    "bullets": [
+      "Redraw from sketch, PDF or scan",
+      "Working to your layer and title block standards",
+      "Dimensioning, annotation and detailing",
+      "PDF-to-CAD and CAD clean-up",
+      "DWG and PDF deliverables"
+    ]
+  },
+  {
+    "title": "Construction Documentation",
+    "summary": "Full CD sets that a builder can actually work from — framing, details and building services coordinated against the architectural set.",
+    "bullets": [
+      "Framing plans and structural layouts",
+      "Wall, roof and connection details",
+      "Electrical, lighting and HVAC layouts",
+      "Schedules and specification annotation",
+      "Coordination between disciplines"
+    ]
+  },
+  {
+    "title": "Scan-to-BIM and As-Built",
+    "summary": "Point cloud data turned into a dependable existing-conditions model, so renovation and refurbishment design starts from what is actually there.",
+    "bullets": [
+      "Point cloud registration and clean-up",
+      "Existing-conditions Revit modelling",
+      "Deviation checking against the scan",
+      "Measured elevations and sections",
+      "Heritage and irregular geometry"
+    ]
+  },
+  {
+    "title": "Structural Drafting",
+    "summary": "Structural plans, framing layouts and connection details for concrete, steel and timber, coordinated with the architectural model.",
+    "bullets": [
+      "Foundation and framing plans",
+      "Concrete, steel and timber detailing",
+      "Reinforcement and connection details",
+      "Structural BIM modelling in Revit",
+      "Coordination with the architectural set"
+    ]
+  },
+  {
+    "title": "MEP Modeling and Coordination",
+    "summary": "Mechanical, electrical and plumbing modelling and clash coordination, run against the architectural and structural models before it reaches site.",
+    "bullets": [
+      "HVAC, electrical and plumbing modelling",
+      "Equipment layouts and service routing",
+      "Clash detection and resolution tracking",
+      "Fire protection layouts",
+      "Coordinated drawings and schedules"
+    ]
+  },
+  {
+    "title": "3D Modeling and Visualisation",
+    "summary": "SketchUp and Revit models for design review, marketing or planning submission, with rendered views when the drawings need to persuade as well as inform.",
+    "bullets": [
+      "SketchUp and Revit modelling",
+      "Interior and exterior rendering",
+      "Site and context modelling",
+      "Massing studies and design options",
+      "Presentation views and walkthrough stills"
+    ]
+  }
+]

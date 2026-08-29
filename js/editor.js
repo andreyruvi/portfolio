@@ -18,7 +18,7 @@
    login already on your computer.
    ========================================================================== */
 import * as R from './render.js';
-import { buildPage } from './page.js';
+import { buildAll } from './page.js';
 import { DATA, state, renderWork, observeReveal, paintImages, setupCoverFlow } from './app.js';
 import { makeZip, textBytes, base64Bytes, download } from './zip.js';
 
@@ -148,26 +148,34 @@ function dimsFor(src) {
 
 /**
  * Hands over everything the site needs, at the paths it needs:
- *   index.html          the finished page
- *   data/site.json      the same content as data, so the two never disagree
- *   images/…            any photo added in this session, full size and thumb
+ *   index.html … contact.html   the finished pages
+ *   data/site.json              profile, copy, contact, stats, tools, SEO
+ *   data/services.json          the service cards
+ *   data/projects.json          the portfolio
+ *   images/…                    any photo added in this session, full + thumb
+ *
+ * The three data files are split the same way the repository splits them, so
+ * extracting the zip over the folder lands every file exactly where it lives.
  */
 function saveAndDownload() {
-  const html = buildPage(DATA, { dims: dimsFor });
-  const files = [
-    { name: 'index.html', bytes: textBytes(html) },
-    { name: 'data/site.json', bytes: textBytes(JSON.stringify(DATA, null, 2)) },
-  ];
+  const pages = buildAll(DATA, { dims: dimsFor });
+  const { services, projects, ...siteOnly } = DATA;
+
+  const files = [];
+  for (const [name, html] of Object.entries(pages)) files.push({ name, bytes: textBytes(html) });
+  files.push({ name: 'data/site.json',     bytes: textBytes(JSON.stringify(siteOnly, null, 2) + '\n') });
+  files.push({ name: 'data/services.json', bytes: textBytes(JSON.stringify(services, null, 2) + '\n') });
+  files.push({ name: 'data/projects.json', bytes: textBytes(JSON.stringify(projects, null, 2) + '\n') });
   for (const [path, b64] of pending) files.push({ name: path, bytes: base64Bytes(b64) });
 
   download(makeZip(files), 'portfolio-update.zip');
 
   const photos = [...pending.keys()].filter((k) => !k.startsWith('images/thumb/')).length;
-  markStatus('DOWNLOADED — extract it into your folder, then run PUBLISH.bat');
+  markStatus('DOWNLOADED — extract it into your folder, then run push.bat');
   toast(
     photos
-      ? `Downloaded portfolio-update.zip — index.html plus ${photos} new photo${photos > 1 ? 's' : ''}. Extract it INTO your portfolio folder, overwrite when asked, then run PUBLISH.bat.`
-      : 'Downloaded portfolio-update.zip with the new index.html. Extract it INTO your portfolio folder, overwrite when asked, then run PUBLISH.bat.',
+      ? `Downloaded portfolio-update.zip — ${Object.keys(pages).length} pages plus ${photos} new photo${photos > 1 ? 's' : ''}. Extract it INTO your portfolio folder, overwrite when asked, then run push.bat.`
+      : `Downloaded portfolio-update.zip with all ${Object.keys(pages).length} pages. Extract it INTO your portfolio folder, overwrite when asked, then run push.bat.`,
     'ok', 15000
   );
 }
@@ -264,18 +272,22 @@ export function renderAll() {
     if (el.textContent !== (v || '')) el.textContent = v || '';
   });
 
-  $('#brandName').textContent = p.name;
-  $('#verifiedBadge').hidden = !p.verified;
-  $('#availDot').hidden = !p.available;
-  $('#statusCell').innerHTML = p.available ? '<span class="mini-dot"></span>Available' : 'Busy';
-  $('#avatarImg').src = R.thumbOf(p.avatar) || p.avatar || '';
-  $('#coverSlides').innerHTML = R.renderCoverSlides(DATA);
-  setupCoverFlow();
+  // Each page carries a different subset of these, so every one is optional.
+  const brand = $('#brandName'); if (brand) brand.textContent = p.name;
+  const avatar = $('#avatarImg'); if (avatar) avatar.src = R.thumbOf(p.avatar) || p.avatar || '';
+  const slides = $('#coverSlides');
+  if (slides) { slides.innerHTML = R.renderCoverSlides(DATA); setupCoverFlow(); }
 
-  $('#tools').innerHTML = R.renderTools(DATA, state.editing);
-  $('#svcGrid').innerHTML = R.renderServices(DATA, state.editing);
-  $('#ctaRow').innerHTML = R.renderCta(DATA);
-  $('#contactInfo').innerHTML = R.renderContact(DATA, state.editing);
+  const tools = $('#tools'); if (tools) tools.innerHTML = R.renderTools(DATA, state.editing);
+  const svc = $('#svcGrid');
+  if (svc) svc.innerHTML = R.renderServices(DATA, state.editing, {
+    detailed: document.body.dataset.page === 'services.html',
+    limit: document.body.dataset.page === 'index.html' ? 6 : 0,
+  });
+  const cta = $('#ctaRow'); if (cta) cta.innerHTML = R.renderCta(DATA);
+  const ci = $('#contactInfo'); if (ci) ci.innerHTML = R.renderContact(DATA, state.editing);
+  const stats = $('.stats'); if (stats) stats.innerHTML = R.renderStats(DATA);
+  const spec = $('.titleblock'); if (spec) spec.innerHTML = R.renderSpec(DATA);
   renderWork();
 
   bindInline();
@@ -426,8 +438,8 @@ function openCover() {
   function sync() {
     DATA.profile.cover = covers()[0] || '';
     persist();
-    $('#coverSlides').innerHTML = R.renderCoverSlides(DATA);
-    setupCoverFlow();
+    const slides = $('#coverSlides');
+    if (slides) { slides.innerHTML = R.renderCoverSlides(DATA); setupCoverFlow(); }
     paint();
   }
   function paint() {
@@ -460,24 +472,43 @@ function openCover() {
 }
 
 /* -------------------------------------------------------- project editor */
+const listToText = (a) => (a || []).join('\n');
+const textToList = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);
+const csvToList  = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
+
 function openProject(id) {
   const isNew = !id;
+  const known = R.categoriesOf(DATA.projects).filter((c) => c !== 'All');
   const pr = isNew
-    ? { id: 'p' + Date.now(), title: '', category: (DATA.categories.find((c) => c !== 'All') || 'Project'), desc: '', image: '', media: [] }
+    ? { id: 'p' + Date.now(), title: '', category: known[0] || 'Permit Drawings',
+        buildingType: 'Residential', location: '', year: '', software: [], tags: [],
+        scope: [], description: '', image: '', media: [] }
     : DATA.projects.find((x) => x.id === id);
   if (!pr) return;
 
   const draft = JSON.parse(JSON.stringify(pr));
 
-  const m = modal(isNew ? 'Add project' : 'Edit project', 'The first image is the cover shown in the grid.', `
+  const m = modal(isNew ? 'Add project' : 'Edit project',
+    'The first image is the cover shown in the grid. One item per line where it says one per line.', `
       <label>Title</label>
-      <input id="pmTitle" type="text" value="${R.attr(draft.title)}">
-      <label>Category</label>
-      <select id="pmCategory"></select>
-      <div class="pm-cats" id="pmCatList"></div>
-      <div class="pm-row"><input id="pmCatNew" type="text" placeholder="Add a new category"><button class="btn" type="button" id="pmCatAdd">Add</button></div>
+      <input id="pmTitle" type="text" value="${R.attr(draft.title)}" placeholder="Modern Bungalow — New Construction Permit Set">
+      <label>Category — groups it under a filter chip</label>
+      <input id="pmCategory" type="text" list="pmCatList" value="${R.attr(draft.category || '')}" placeholder="Permit Drawings">
+      <datalist id="pmCatList">${known.map((c) => `<option value="${R.attr(c)}">`).join('')}</datalist>
+      <label>Building type</label>
+      <input id="pmType" type="text" value="${R.attr(draft.buildingType || '')}" placeholder="Residential / Commercial / Mixed">
+      <label>Location — optional</label>
+      <input id="pmLoc" type="text" value="${R.attr(draft.location || '')}" placeholder="Leave blank if you would rather not say">
+      <label>Year — optional</label>
+      <input id="pmYear" type="text" value="${R.attr(draft.year || '')}" placeholder="2024">
+      <label>Software — comma separated</label>
+      <input id="pmSoft" type="text" value="${R.attr((draft.software || []).join(', '))}" placeholder="Revit, AutoCAD">
+      <label>Tags — comma separated</label>
+      <input id="pmTags" type="text" value="${R.attr((draft.tags || []).join(', '))}" placeholder="Residential, Permit Set, Framing">
+      <label>Scope — one line per item</label>
+      <textarea id="pmScope" style="min-height:110px">${R.esc(listToText(draft.scope))}</textarea>
       <label>Description</label>
-      <textarea id="pmDesc">${R.esc(draft.desc || '')}</textarea>
+      <textarea id="pmDesc">${R.esc(draft.description || draft.desc || '')}</textarea>
       <label>Images &amp; PDFs</label>
       <div id="pmMediaList" class="media-list"></div>
       <button class="btn" type="button" id="pmAddFiles" style="width:100%;justify-content:center;margin-top:.6rem">⤒ Add images / PDFs from device</button>
@@ -485,18 +516,25 @@ function openProject(id) {
     { label: 'Cancel', onClick: (w) => w.remove() },
     { label: 'Save project', primary: true, onClick: (w) => {
         draft.title = $('#pmTitle', w).value.trim() || 'Untitled project';
-        draft.category = $('#pmCategory', w).value;
-        draft.desc = $('#pmDesc', w).value;
+        draft.category = $('#pmCategory', w).value.trim() || 'Project';
+        draft.buildingType = $('#pmType', w).value.trim();
+        draft.location = $('#pmLoc', w).value.trim();
+        draft.year = $('#pmYear', w).value.trim();
+        draft.software = csvToList($('#pmSoft', w).value);
+        draft.tags = csvToList($('#pmTags', w).value);
+        draft.scope = textToList($('#pmScope', w).value);
+        draft.description = $('#pmDesc', w).value;
+        delete draft.desc;
         draft.image = R.projThumb(draft) || '';
+
         if (isNew) DATA.projects.unshift(draft);
         else Object.assign(DATA.projects.find((x) => x.id === id), draft);
 
-        // If a category filter is active and the project does not match it, the
-        // card would be created and then immediately hidden. Move the filter to
-        // where the project actually is.
-        if (state.filter !== 'All' && state.filter !== draft.category) {
-          state.filter = DATA.categories.includes(draft.category) ? draft.category : 'All';
-        }
+        // A category filter that does not match would hide the card the moment
+        // it is created, which reads as "nothing happened".
+        if (state.filter !== 'All' && state.filter !== draft.category) state.filter = draft.category;
+        state.query = '';
+        const box = $('#projSearch'); if (box) box.value = '';
 
         w.remove(); persist(); renderAll();
         flashCard(draft.id);
@@ -506,24 +544,6 @@ function openProject(id) {
       } },
   ]);
 
-  function paintCats() {
-    // Older data can carry a category that never made it into the filter list.
-    // Register it rather than quietly reassigning the project to another one.
-    if (draft.category && !DATA.categories.includes(draft.category)) {
-      DATA.categories.push(draft.category);
-      persist();
-    }
-    const cats = DATA.categories.filter((c) => c !== 'All');
-    if (!cats.includes(draft.category) && cats.length) draft.category = cats[0];
-    $('#pmCategory', m).innerHTML = cats
-      .map((c) => `<option${c === draft.category ? ' selected' : ''}>${R.esc(c)}</option>`).join('');
-    $('#pmCatList', m).innerHTML = cats
-      .map((c) => `<span class="pm-cat">${R.esc(c)}<button class="pm-cat-x" type="button" data-cat="${R.attr(c)}">✕</button></span>`).join('');
-    $$('[data-cat]', m).forEach((b) => b.addEventListener('click', () => {
-      removeCategory(b.dataset.cat);
-      paintCats();
-    }));
-  }
   function paintMedia() {
     $('#pmMediaList', m).innerHTML = R.renderMediaList(draft.media || [], 'pm');
     $$('[data-rm]', m).forEach((b) => b.addEventListener('click', () => { draft.media.splice(+b.dataset.rm, 1); paintMedia(); }));
@@ -535,15 +555,6 @@ function openProject(id) {
       paintMedia();
     }));
   }
-  $('#pmCatAdd', m).addEventListener('click', () => {
-    const v = $('#pmCatNew', m).value.trim();
-    if (v && !DATA.categories.includes(v)) { DATA.categories.push(v); draft.category = v; persist(); }
-    $('#pmCatNew', m).value = '';
-    paintCats();
-  });
-  $('#pmCatNew', m).addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); $('#pmCatAdd', m).click(); }
-  });
   $('#pmAddFiles', m).addEventListener('click', async () => {
     draft.media.push(...await pickFiles({ multiple: true, pdf: true }));
     paintMedia();
@@ -559,40 +570,7 @@ function openProject(id) {
     if (e.key === 'Enter') { e.preventDefault(); $('#pmAddUrl', m).click(); }
   });
 
-  paintCats();
   paintMedia();
-}
-
-/* ------------------------------------------------------------ categories */
-function removeCategory(name) {
-  DATA.categories = DATA.categories.filter((c) => c !== name);
-  if (!DATA.categories.includes('All')) DATA.categories.unshift('All');
-  if (state.filter === name) state.filter = 'All';
-  persist();
-  renderAll();
-}
-
-function addCategoryInline() {
-  const add = $('#filterAdd');
-  if (!add) return;
-  const input = document.createElement('input');
-  input.className = 'filter-input';
-  input.placeholder = 'New category';
-  add.replaceWith(input);
-  input.focus();
-  let done = false;
-  const commit = () => {
-    if (done) return;
-    done = true;
-    const v = input.value.trim();
-    if (v && !DATA.categories.includes(v)) { DATA.categories.push(v); persist(); }
-    renderAll();
-  };
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    else if (e.key === 'Escape') { done = true; renderAll(); }
-  });
-  input.addEventListener('blur', commit);
 }
 
 /* ------------------------------------------------- delegated edit actions */
@@ -616,10 +594,6 @@ document.addEventListener('click', (e) => {
     });
     return;
   }
-
-  if (t.closest('#filterAdd')) { addCategoryInline(); return; }
-  const fx = t.closest('[data-fx]');
-  if (fx) { e.stopPropagation(); removeCategory(fx.dataset.fx); return; }
 
   if (t.closest('[data-proj-add]')) { openProject(null); return; }
   const pe = t.closest('[data-proj-edit]');
@@ -646,7 +620,6 @@ function toolbar() {
     <button type="button" id="tbAddProject">＋ Add project</button>
     <button type="button" id="tbDetails">⚙ Edit details</button>
     <button type="button" id="tbCover">⟲ Cover photos</button>
-    <button type="button" id="tbAvatar">⟲ Change photo</button>
     <button type="button" id="tbKey">Change password</button>
     <button type="button" id="tbReset">↺ Reset to file</button>
     <button type="button" class="save" id="tbDownload">⤓ Save &amp; Download</button>
@@ -655,13 +628,12 @@ function toolbar() {
 
   $('#tbAddProject').addEventListener('click', () => openProject(null));
   $('#tbDetails').addEventListener('click', openDetails);
-  $('#tbCover').addEventListener('click', openCover);
-  $('#tbAvatar').addEventListener('click', async () => {
-    const [img] = await pickFiles({ multiple: false });
-    if (!img) return;
-    DATA.profile.avatar = img.src;
-    persist(); renderAll();
-    toast('Profile photo replaced.');
+  $('#tbCover').addEventListener('click', () => {
+    if (!$('#coverSlides')) {
+      toast('The cover photos live on the home page — open index.html to change them.', 'err', 7000);
+      return;
+    }
+    openCover();
   });
   $('#tbKey').addEventListener('click', openChangeKey);
   $('#tbReset').addEventListener('click', () => {
@@ -682,10 +654,12 @@ function toolbar() {
     location.reload();
   });
 
-  $('#coverEditBtn').hidden = false;
-  $('#avatarEditBtn').hidden = false;
-  $('#coverEditBtn').addEventListener('click', openCover);
-  $('#avatarEditBtn').addEventListener('click', () => $('#tbAvatar').click());
+  // The cover only exists on the home page; every other page has no hero.
+  const coverBtn = $('#coverEditBtn');
+  if (coverBtn) {
+    coverBtn.hidden = false;
+    coverBtn.addEventListener('click', openCover);
+  }
 }
 
 function openChangeKey() {
